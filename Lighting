@@ -1,0 +1,105 @@
+local Lighting = game:GetService("Lighting")
+local Terrain  = workspace.Terrain
+
+local DELETABLE = {
+    "Atmosphere",
+    "BloomEffect",
+    "BlurEffect",
+    "ColorCorrectionEffect",
+    "DepthOfFieldEffect",
+    "SunRaysEffect",
+    "Sky",
+}
+for _, child in ipairs(Lighting:GetChildren()) do
+    for _, cls in ipairs(DELETABLE) do
+        if child.ClassName == cls then
+            child:Destroy()
+            break
+        end
+    end
+end
+
+Lighting.Ambient = Color3.fromRGB(138, 138, 138)
+Lighting.Brightness = 2
+Lighting.ClockTime = 12.301944732666016
+Lighting.ColorShift_Bottom = Color3.fromRGB(53, 53, 53)
+Lighting.ColorShift_Top = Color3.fromRGB(90, 90, 90)
+Lighting.EnvironmentDiffuseScale = 0
+Lighting.EnvironmentSpecularScale = 0
+Lighting.ExposureCompensation = 0
+Lighting.FogColor = Color3.fromRGB(192, 192, 192)
+Lighting.FogEnd = 100000
+Lighting.FogStart = 0
+Lighting.GeographicLatitude = 15
+Lighting.GlobalShadows = true
+Lighting.OutdoorAmbient = Color3.fromRGB(128, 128, 128)
+Lighting.ShadowSoftness = 0.20000000298023224
+Lighting.Technology = Enum.Technology.ShadowMap
+
+Terrain.WaterColor = Color3.fromRGB(0, 148, 162)
+Terrain.WaterReflectance = 1
+Terrain.WaterTransparency = 1
+Terrain.WaterWaveSize = 0.4000000059604645
+Terrain.WaterWaveSpeed = 35
+
+do
+    local existingClouds = workspace.Terrain:FindFirstChildOfClass("Clouds")
+    if existingClouds then existingClouds:Destroy() end
+    local clouds = Instance.new("Clouds")
+    clouds.Name = "Clouds"
+    clouds.Color = Color3.fromRGB(255, 255, 255)
+    clouds.Cover = 0.7139999866485596
+    clouds.Density = 0.2930000126361847
+    clouds.Enabled = true
+    clouds.Parent = workspace.Terrain
+end
+
+do
+    local inst = Instance.new("SunRaysEffect")
+    inst.Name   = "SunRays"
+    inst.Enabled = true
+    inst.Intensity = 0.0820000022649765
+    inst.Spread = 1
+    inst.Parent = Lighting
+end
+
+do
+    local inst = Instance.new("Sky")
+    inst.Name   = "Clear Blue Sky"
+    inst.CelestialBodiesShown = true
+    inst.MoonAngularSize = 25
+    inst.MoonTextureId = "rbxassetid://106784196573850"
+    inst.SkyboxBk = "http://www.roblox.com/asset/?id=91458024"
+    inst.SkyboxDn = "http://www.roblox.com/asset/?id=91457980"
+    inst.SkyboxFt = "http://www.roblox.com/asset/?id=91458024"
+    inst.SkyboxLf = "http://www.roblox.com/asset/?id=91458024"
+    inst.SkyboxRt = "http://www.roblox.com/asset/?id=91458024"
+    inst.SkyboxUp = "http://www.roblox.com/asset/?id=91458002"
+    inst.StarCount = 5000
+    inst.SunAngularSize = 9
+    inst.SunTextureId = "rbxasset://sky/sun.jpg"
+    inst.Parent = Lighting
+end
+
+do
+    local inst = Instance.new("Atmosphere")
+    inst.Name   = "Atmosphere"
+    inst.Color = Color3.fromRGB(0, 0, 0)
+    inst.Decay = Color3.fromRGB(0, 0, 0)
+    inst.Density = 0.21299999952316284
+    inst.Glare = 0
+    inst.Haze = 0
+    inst.Offset = 0
+    inst.Parent = Lighting
+end
+
+do
+    local inst = Instance.new("ColorCorrectionEffect")
+    inst.Name   = "ColorCorrection"
+    inst.Brightness = 0
+    inst.Contrast = 0
+    inst.Enabled = true
+    inst.Saturation = 0
+    inst.TintColor = Color3.fromRGB(255, 255, 255)
+    inst.Parent = Lighting
+end
