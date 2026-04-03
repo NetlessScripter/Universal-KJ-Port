@@ -86,6 +86,7 @@ for v8 = 1, 13 do
     end;
     local l_Overlay_0 = v9.Base.Overlay;
     l_Overlay_0.MouseEnter:Connect(function() --[[ Line: 58 ]]
+        if shared.Fatigued then return end;
         l_Overlay_0.ImageTransparency = 0;
     end);
     l_Overlay_0.MouseLeave:Connect(function() --[[ Line: 62 ]]
