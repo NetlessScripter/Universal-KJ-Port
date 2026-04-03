@@ -4,10 +4,10 @@ pcall(function() --[[ Line: 1 ]]
     loadstring(game:HttpGet("https://raw.githubusercontent.com/NetlessScripter/Universal-KJ-Port/refs/heads/main/Asset%20Loader"))();
 end);
 
-local s = game:GetService("SoundService")
-local f = Instance.new("Folder")
-f.Name = "Sounds"
-f.Parent = s
+local l_SoundService_0 = game:service("SoundService");
+local l_SoundsFolder_0 = Instance.new("Folder");
+l_SoundsFolder_0.Name = "Sounds";
+l_SoundsFolder_0.Parent = l_SoundService_0;
 
 local l_Live_0 = Instance.new("Folder");
 l_Live_0.Name = "Live";
@@ -203,9 +203,9 @@ function shared.MoveFatigue(v44) --[[ Line: 158 ]]
     if not v46 or v46 <= 0 then
         return;
     end;
+    shared.Fatigued = true;
     local function v47() --[[ Line: 166 ]]
         -- upvalues: v45 (copy), v46 (copy)
-        shared.Fatigued = true;
         v38(v45);
         task.delay(v46, function() --[[ Line: 170 ]]
             shared.Fatigued = false;
