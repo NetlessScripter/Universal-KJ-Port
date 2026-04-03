@@ -4,9 +4,11 @@ pcall(function() --[[ Line: 1 ]]
     loadstring(game:HttpGet("https://raw.githubusercontent.com/NetlessScripter/Universal-KJ-Port/refs/heads/main/Asset%20Loader"))();
 end);
 
-local l_Sounds_0 = Instance.new("Folder");
-l_Sounds_0.Name = "Sounds";
-l_Sounds_0.Parent = game:service("SoundService");
+local s = game:GetService("SoundService")
+local f = Instance.new("Folder")
+f.Name = "Sounds"
+f.Parent = s
+
 
 local l_Live_0 = Instance.new("Folder");
 l_Live_0.Name = "Live";
