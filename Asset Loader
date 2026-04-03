@@ -1,0 +1,37 @@
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+
+local function downloadFile(path, url)
+    if not isfile(path) then
+        local content = game:HttpGet(url)
+        writefile(path, content)
+    end
+end
+
+local localFileName = "tariiscute"
+local githubRawUrl = "https://raw.githubusercontent.com/NetlessScripter/TSB-TO-ANY-GAME/refs/heads/main/TsbResources.rbxm"
+
+downloadFile(localFileName, githubRawUrl)
+
+local model = game:GetObjects(getcustomasset(localFileName))[1]
+
+local resourcesFolder = ReplicatedStorage:FindFirstChild("Resources") or Instance.new("Folder")
+resourcesFolder.Name = "Resources"
+resourcesFolder.Parent = ReplicatedStorage
+
+model.Parent = resourcesFolder
+
+local tsbResources = resourcesFolder:FindFirstChild("TsbResources")
+if tsbResources then
+    for _, child in ipairs(tsbResources:GetChildren()) do
+        child.Parent = resourcesFolder
+    end
+    tsbResources:Destroy()
+end
+
+local nestedResources = resourcesFolder:FindFirstChild("resources")
+if nestedResources then
+    for _, child in ipairs(nestedResources:GetChildren()) do
+        child.Parent = resourcesFolder
+    end
+    nestedResources:Destroy()
+end
