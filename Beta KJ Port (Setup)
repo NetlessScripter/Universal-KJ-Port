@@ -169,6 +169,8 @@ local v37 = Instance.new("Folder");
 v37.Name = "FatigueHold";
 v37.Parent = game:service("ReplicatedStorage");
 
+local l_FatigueToken_0 = 0;
+
 local function v38(v39) --[[ Line: 131 ]]
     -- upvalues: l_LocalPlayer_0 (copy), v37 (copy)
     local l_Character_1 = l_LocalPlayer_0.Character;
@@ -197,19 +199,23 @@ local function v42() --[[ Line: 148 ]]
 end;
 
 function shared.MoveFatigue(v44) --[[ Line: 158 ]]
-    -- upvalues: v36 (copy), v38 (copy), v42 (copy)
+    -- upvalues: v36 (copy), v38 (copy), v42 (copy), l_FatigueToken_0 (ref)
     local v45 = v44.Name;
     local v46 = v36[v45];
     if not v46 or v46 <= 0 then
         return;
     end;
     shared.Fatigued = true;
+    l_FatigueToken_0 = l_FatigueToken_0 + 1;
+    local l_Token_0 = l_FatigueToken_0;
     local function v47() --[[ Line: 166 ]]
-        -- upvalues: v45 (copy), v46 (copy)
+        -- upvalues: v45 (copy), v46 (copy), l_Token_0 (copy)
         v38(v45);
         task.delay(v46, function() --[[ Line: 170 ]]
-            shared.Fatigued = false;
-            v42();
+            if l_FatigueToken_0 == l_Token_0 then
+                shared.Fatigued = false;
+                v42();
+            end;
         end);
     end;
     if v45 == "Ravage" then
