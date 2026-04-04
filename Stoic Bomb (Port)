@@ -14,7 +14,7 @@ local cooldown = false
     cooldown = true
     Humanoid.WalkSpeed = 0
 
-    getgenv().Animator6D(17141153099, 1, false)
+    getgenv().Animator6D(17141153099, 1.2, false)
 
     task.delay(2, function()
         Humanoid.WalkSpeed = 25
