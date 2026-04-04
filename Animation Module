@@ -13,13 +13,125 @@ local humanoid  = character:WaitForChild("Humanoid")
 -- ─────────────────────────────────────────────
 --  Cache
 -- ─────────────────────────────────────────────
-local KFSCache = {}
+local KFSCache      = {}
+local PlaceIdCache  = {}  -- [animId] = ownerPlaceId
 
 -- ─────────────────────────────────────────────
 --  Helpers
 -- ─────────────────────────────────────────────
 local function cleanId(id)
     return tostring(id):gsub("^rbxassetid://", ""):gsub("%s", "")
+end
+
+-- ─────────────────────────────────────────────
+--  Executor-agnostic HTTP GET
+--  Tries syn.request → http.request → request
+--  → game:HttpGet in order
+-- ─────────────────────────────────────────────
+local function httpGet(url)
+    -- syn / Synapse X
+    if syn and syn.request then
+        local ok, res = pcall(syn.request, { Url = url, Method = "GET" })
+        if ok and res and res.StatusCode == 200 then return res.Body end
+    end
+    -- http (some executors expose it this way)
+    if http and http.request then
+        local ok, res = pcall(http.request, { Url = url, Method = "GET" })
+        if ok and res and res.StatusCode == 200 then return res.Body end
+    end
+    -- generic request() (KRNL, Fluxus, etc.)
+    if request then
+        local ok, res = pcall(request, { Url = url, Method = "GET" })
+        if ok and res and res.StatusCode == 200 then return res.Body end
+    end
+    -- fallback: game:HttpGet (works if the current game has HttpEnabled)
+    local ok, body = pcall(function() return game:HttpGet(url) end)
+    if ok and body and #body > 0 then return body end
+    return nil
+end
+
+-- ─────────────────────────────────────────────
+--  Auto-lookup: find a place ID owned by the
+--  same creator as the animation asset.
+--  Result is cached so we only call the API once
+--  per animation ID.
+--
+--  How it works:
+--    1. economy API → get creator (user or group)
+--    2. games API   → get their first public place
+--    3. Return that place ID so we can spoof it
+-- ─────────────────────────────────────────────
+local function lookupOwnerPlaceId(animId)
+    if PlaceIdCache[animId] then return PlaceIdCache[animId] end
+
+    -- Step 1: asset details
+    local details = httpGet(
+        "https://economy.roblox.com/v2/assets/" .. animId .. "/details"
+    )
+    if not details then return nil end
+
+    local creatorId   = details:match('"Id":(%d+)')
+    local creatorType = details:match('"CreatorType":"(%a+)"')
+    if not creatorId then return nil end
+
+    -- Step 2: games owned by that creator
+    local gamesUrl
+    if creatorType == "Group" then
+        gamesUrl = "https://games.roblox.com/v2/groups/"
+            .. creatorId .. "/games?accessFilter=2&limit=10&sortOrder=Asc"
+    else
+        gamesUrl = "https://games.roblox.com/v2/users/"
+            .. creatorId .. "/games?accessFilter=2&limit=10&sortOrder=Asc"
+    end
+
+    local gamesBody = httpGet(gamesUrl)
+    if not gamesBody then return nil end
+
+    -- rootPlaceId lives at the universe level
+    local placeId = tonumber(gamesBody:match('"rootPlaceId":(%d+)'))
+    if not placeId then
+        -- fallback: older response shape
+        placeId = tonumber(gamesBody:match('"id":(%d+)'))
+    end
+
+    if placeId then
+        PlaceIdCache[animId] = placeId
+    end
+    return placeId
+end
+
+-- ─────────────────────────────────────────────
+--  Temporarily spoof game.PlaceId so that the
+--  internal assetdelivery request sends the
+--  correct serverplaceid, granting permission
+--  to fetch private animations.
+--  Restores the real PlaceId afterwards.
+-- ─────────────────────────────────────────────
+local function withSpoofedPlaceId(targetPlaceId, fn)
+    if not targetPlaceId then return fn() end
+
+    local original = game.PlaceId
+    local spoofed  = false
+
+    -- sethiddenproperty is available in most modern executors
+    if sethiddenproperty then
+        pcall(function()
+            sethiddenproperty(game, "PlaceId", targetPlaceId)
+            spoofed = true
+        end)
+    end
+
+    -- tiny yield so the engine propagates the new value before the fetch
+    if spoofed then task.wait(0.05) end
+
+    local result = fn()
+
+    -- always restore
+    if spoofed then
+        pcall(function() sethiddenproperty(game, "PlaceId", original) end)
+    end
+
+    return result
 end
 
 local function findKFS(obj)
@@ -41,28 +153,57 @@ end
 
 -- ─────────────────────────────────────────────
 --  Multi-method KFS loader
+--
+--  Fetch order:
+--    1. GetObjects × 5 retries (plain)
+--    2. GetObjects × 3 retries with PlaceId spoof
+--       (auto-lookup owner place, or manual override)
+--    3. KeyframeSequenceProvider (elevated executors)
+--    4. Animator warm-up → re-fetch with spoof
+--    5. Dummy pre-warm → final retry with spoof
 -- ─────────────────────────────────────────────
 local function loadKFS(rawId)
     local id = cleanId(rawId)
     if KFSCache[id] then return KFSCache[id] end
 
-    -- Method 1: game:GetObjects with 5 retries + exponential back-off
-    local delays = { 0, 0.3, 0.7, 1.5, 3.0 }
-    for attempt = 1, 5 do
+    -- Allow manual place ID override:  getgenv().Animator6DPlaceId = 123456
+    local manualPlaceId = getgenv().Animator6DPlaceId
+
+    local function tryGetObjects()
         local ok, result = pcall(function()
             return game:GetObjects("rbxassetid://" .. id)
         end)
         if ok and result and result[1] then
             local kfs = findKFS(result[1]) or (result[1]:IsA("KeyframeSequence") and result[1])
-            if isValidKFS(kfs) then
-                KFSCache[id] = kfs
-                return kfs
-            end
+            if isValidKFS(kfs) then return kfs end
         end
+        return nil
+    end
+
+    -- ── Method 1: plain GetObjects × 5 retries ────────────────────────
+    local delays = { 0, 0.3, 0.7, 1.5, 3.0 }
+    for attempt = 1, 5 do
+        local kfs = tryGetObjects()
+        if kfs then KFSCache[id] = kfs; return kfs end
         if attempt < 5 then task.wait(delays[attempt]) end
     end
 
-    -- Method 2: KeyframeSequenceProvider (elevated-security executors)
+    -- ── Method 2: GetObjects with PlaceId spoof ────────────────────────
+    --  Auto-lookup the owner's place ID from Roblox's economy/games APIs.
+    --  Temporarily sets game.PlaceId to that value so the internal
+    --  assetdelivery request sends the correct serverplaceid, bypassing
+    --  the private-animation permission check.
+    local ownerPlaceId = manualPlaceId or lookupOwnerPlaceId(id)
+    if ownerPlaceId then
+        local spoofDelays = { 0, 0.5, 1.5 }
+        for attempt = 1, 3 do
+            local kfs = withSpoofedPlaceId(ownerPlaceId, tryGetObjects)
+            if kfs then KFSCache[id] = kfs; return kfs end
+            if attempt < 3 then task.wait(spoofDelays[attempt]) end
+        end
+    end
+
+    -- ── Method 3: KeyframeSequenceProvider (elevated-security executors)
     if KFSProvider then
         local ok2, kfs2 = pcall(function()
             return KFSProvider:GetKeyframeSequenceAsync("rbxassetid://" .. id)
@@ -73,36 +214,22 @@ local function loadKFS(rawId)
         end
     end
 
-    -- Method 3: Warm up via Animator then re-fetch
+    -- ── Method 4: Animator warm-up → re-fetch with spoof ──────────────
     pcall(function()
         local anim = Instance.new("Animation")
         anim.AnimationId = "rbxassetid://" .. id
         local animator = humanoid:FindFirstChildOfClass("Animator")
-        if animator then
-            pcall(function() animator:LoadAnimation(anim) end)
-        end
+        if animator then pcall(function() animator:LoadAnimation(anim) end) end
     end)
     task.wait(0.5)
-    local ok3, r3 = pcall(function() return game:GetObjects("rbxassetid://" .. id) end)
-    if ok3 and r3 and r3[1] then
-        local kfs3 = findKFS(r3[1]) or (r3[1]:IsA("KeyframeSequence") and r3[1])
-        if isValidKFS(kfs3) then
-            KFSCache[id] = kfs3
-            return kfs3
-        end
-    end
+    local kfs4 = withSpoofedPlaceId(ownerPlaceId, tryGetObjects)
+    if kfs4 then KFSCache[id] = kfs4; return kfs4 end
 
-    -- Method 4: Dummy pre-warm then final retry
+    -- ── Method 5: Dummy pre-warm → final retry with spoof ─────────────
     pcall(function() game:GetObjects("rbxassetid://507776093") end)
     task.wait(0.2)
-    local ok4, r4 = pcall(function() return game:GetObjects("rbxassetid://" .. id) end)
-    if ok4 and r4 and r4[1] then
-        local kfs4 = findKFS(r4[1]) or (r4[1]:IsA("KeyframeSequence") and r4[1])
-        if isValidKFS(kfs4) then
-            KFSCache[id] = kfs4
-            return kfs4
-        end
-    end
+    local kfs5 = withSpoofedPlaceId(ownerPlaceId, tryGetObjects)
+    if kfs5 then KFSCache[id] = kfs5; return kfs5 end
 
     return nil
 end
