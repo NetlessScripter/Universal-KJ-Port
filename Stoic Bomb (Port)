@@ -20,7 +20,7 @@ local cooldown = false
         Humanoid.WalkSpeed = 25
         cooldown = false
     end)
-
+wait(0.3)
 --[[
 ================================================================================
   EXTRACTION ANALYSIS — StoicBomb_Apply.lua
