@@ -595,6 +595,35 @@ function AnimPlayer:_sampleFrame()
     end
 end
 
+-- ─────────────────────────────────────────────
+--  TimePosition get / set
+--  Works whether the animation is playing or
+--  paused.  Setting jumps instantly to that
+--  pose without interrupting playback state.
+-- ─────────────────────────────────────────────
+function AnimPlayer:GetTimePosition()
+    return self.time
+end
+
+function AnimPlayer:SetTimePosition(t)
+    -- Clamp to [0, length]
+    self.time = math.clamp(tonumber(t) or 0, 0, self.length)
+
+    -- Reset the tracked frame index so _sampleFrame searches from scratch
+    -- instead of assuming the index is still valid after the jump.
+    self.frameIndex = 1
+    local frames = self.frames
+    local n = #frames
+    -- Fast-forward frameIndex to the correct segment for the new time
+    while self.frameIndex < n - 1
+        and frames[self.frameIndex + 1].Time <= self.time do
+        self.frameIndex += 1
+    end
+
+    -- Apply the pose immediately (visible even while paused)
+    self:_sampleFrame()
+end
+
 function AnimPlayer:Play(speed, looped)
     if self.playing then return end
     self.playing = true
@@ -747,4 +776,57 @@ getgenv().Animator6DStop = function()
         pcall(function() getgenv().currentAnimator6D:Stop(true) end)
         getgenv().currentAnimator6D = nil
     end
+end
+
+-- ─────────────────────────────────────────────
+--  TimePosition public API
+--
+--  Two equivalent ways to use it:
+--
+--  Functional:
+--    Animator6DSetTime(1.25)         -- jump to 1.25 s
+--    print(Animator6DGetTime())      -- read current position
+--
+--  Property-style (same table as Animation.Completed):
+--    Animation.TimePosition = 1.25   -- jump to 1.25 s
+--    print(Animation.TimePosition)   -- read current position
+-- ─────────────────────────────────────────────
+getgenv().Animator6DSetTime = function(t)
+    local anim = getgenv().currentAnimator6D
+    if anim then
+        anim:SetTimePosition(t)
+    else
+        warn("[Animator6D] Animator6DSetTime: no animation is currently active")
+    end
+end
+
+getgenv().Animator6DGetTime = function()
+    local anim = getgenv().currentAnimator6D
+    if anim then
+        return anim:GetTimePosition()
+    end
+    return 0
+end
+
+-- Expose TimePosition as a property on the Animation table via a metatable.
+-- Animation.Completed (a BindableEvent.Event) is already set on the raw
+-- table, so we proxy through __index / __newindex for TimePosition only.
+do
+    local raw = getgenv().Animation
+    local proxy = setmetatable({}, {
+        __index = function(_, k)
+            if k == "TimePosition" then
+                return getgenv().Animator6DGetTime()
+            end
+            return raw[k]
+        end,
+        __newindex = function(_, k, v)
+            if k == "TimePosition" then
+                getgenv().Animator6DSetTime(v)
+            else
+                raw[k] = v
+            end
+        end,
+    })
+    getgenv().Animation = proxy
 end
