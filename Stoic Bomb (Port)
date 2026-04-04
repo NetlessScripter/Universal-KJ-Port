@@ -14,13 +14,13 @@ local cooldown = false
     cooldown = true
     Humanoid.WalkSpeed = 0
 
-    getgenv().Animator6D(17141153099, 1.2, false)
+    getgenv().Animator6D(17141153099, 1.4, false)
 
     task.delay(2, function()
         Humanoid.WalkSpeed = 25
         cooldown = false
     end)
-wait(0.6)
+
 --[[
 ================================================================================
   EXTRACTION ANALYSIS — StoicBomb_Apply.lua
