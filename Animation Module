@@ -152,85 +152,216 @@ local function isValidKFS(kfs)
 end
 
 -- ─────────────────────────────────────────────
---  Multi-method KFS loader
+--  Executor HTTP helper
+--  Tries every known executor request API
+-- ─────────────────────────────────────────────
+local function execRequest(opts)
+    local fn = (typeof(request)  == "function" and request)
+            or (syn and syn.request)
+            or (http and typeof(http.request) == "function" and http.request)
+            or (http_request)
+    if not fn then return nil end
+    local ok, res = pcall(fn, opts)
+    return (ok and res) or nil
+end
+
+-- ─────────────────────────────────────────────
+--  Thread identity helpers
+--  Escalate to identity 8 (max engine level),
+--  run fn, restore original identity
+-- ─────────────────────────────────────────────
+local function withIdentity(level, fn)
+    local original
+    if getthreadidentity then
+        pcall(function() original = getthreadidentity() end)
+    end
+    if setthreadidentity then
+        pcall(setthreadidentity, level)
+    end
+    local result = fn()
+    if setthreadidentity and original then
+        pcall(setthreadidentity, original)
+    end
+    return result
+end
+
+-- ─────────────────────────────────────────────
+--  Multi-method nuclear KFS loader
 --
---  Fetch order:
---    1. GetObjects × 5 retries (plain)
---    2. GetObjects × 3 retries with PlaceId spoof
---       (auto-lookup owner place, or manual override)
---    3. KeyframeSequenceProvider (elevated executors)
---    4. Animator warm-up → re-fetch with spoof
---    5. Dummy pre-warm → final retry with spoof
+--  Method 1  setthreadidentity(8) + GetObjects
+--  Method 2  request() CDN download → writefile
+--              → getcustomasset → GetObjects
+--  Method 3  setthreadidentity(6) + KFSProvider
+--  Method 4  PlaceId spoof + GetObjects × 3
+--  Method 5  Plain GetObjects × 5 retries
+--  Method 6  GC scan (getgc)
+--  Method 7  Nil instance scan (getnilinstances)
+--  Method 8  Animator warm-up + elevated re-fetch
+--  Method 9  Dummy pre-warm + final retry
 -- ─────────────────────────────────────────────
 local function loadKFS(rawId)
     local id = cleanId(rawId)
     if KFSCache[id] then return KFSCache[id] end
 
-    -- Allow manual place ID override:  getgenv().Animator6DPlaceId = 123456
     local manualPlaceId = getgenv().Animator6DPlaceId
 
+    -- shared: try GetObjects and extract a valid KFS
     local function tryGetObjects()
         local ok, result = pcall(function()
             return game:GetObjects("rbxassetid://" .. id)
         end)
         if ok and result and result[1] then
-            local kfs = findKFS(result[1]) or (result[1]:IsA("KeyframeSequence") and result[1])
+            local kfs = findKFS(result[1])
+                     or (result[1]:IsA("KeyframeSequence") and result[1])
             if isValidKFS(kfs) then return kfs end
         end
         return nil
     end
 
-    -- ── Method 1: plain GetObjects × 5 retries ────────────────────────
-    local delays = { 0, 0.3, 0.7, 1.5, 3.0 }
-    for attempt = 1, 5 do
-        local kfs = tryGetObjects()
-        if kfs then KFSCache[id] = kfs; return kfs end
-        if attempt < 5 then task.wait(delays[attempt]) end
+    local function cache(kfs)
+        KFSCache[id] = kfs
+        return kfs
     end
 
-    -- ── Method 2: GetObjects with PlaceId spoof ────────────────────────
-    --  Auto-lookup the owner's place ID from Roblox's economy/games APIs.
-    --  Temporarily sets game.PlaceId to that value so the internal
-    --  assetdelivery request sends the correct serverplaceid, bypassing
-    --  the private-animation permission check.
+    -- ── Method 1: identity(8) + GetObjects ────────────────────────────
+    --  Identity 8 is the highest Roblox engine level.  At this level
+    --  GetObjects has no asset-permission restrictions whatsoever.
+    do
+        local kfs = withIdentity(8, tryGetObjects)
+        if kfs then return cache(kfs) end
+    end
+
+    -- ── Method 2: Direct CDN download via executor request() ──────────
+    --  Executors inject the .ROBLOSECURITY session cookie automatically
+    --  into every request(), so the CDN authenticates us as the logged-in
+    --  user and returns the raw asset bytes regardless of place permissions.
+    --  We write them to disk, mount via getcustomasset, then GetObjects.
+    if execRequest and writefile and getcustomasset then
+        local filename = "anim6d_" .. id .. ".rbxm"
+        local endpoints = {
+            "https://assetdelivery.roblox.com/v1/asset?id="  .. id,
+            "https://assetdelivery.roblox.com/v1/assetId/"   .. id,
+            "https://assetdelivery.roblox.com/v2/assetId/"   .. id,
+        }
+        for _, url in ipairs(endpoints) do
+            local res = execRequest({
+                Url     = url,
+                Method  = "GET",
+                Headers = { ["User-Agent"] = "Roblox/WinInet" },
+            })
+            if res and res.StatusCode == 200 and res.Body and #res.Body > 100 then
+                pcall(writefile, filename, res.Body)
+                local hasFile = isfile and isfile(filename)
+                if hasFile then
+                    local localUrl = pcall(getcustomasset, filename)
+                        and getcustomasset(filename)
+                    if localUrl then
+                        local ok2, objs = pcall(function()
+                            return game:GetObjects(localUrl)
+                        end)
+                        if ok2 and objs and objs[1] then
+                            local kfs = findKFS(objs[1])
+                                     or (objs[1]:IsA("KeyframeSequence") and objs[1])
+                            if isValidKFS(kfs) then
+                                pcall(delfile or function() end, filename)
+                                return cache(kfs)
+                            end
+                        end
+                    end
+                end
+            end
+        end
+    end
+
+    -- ── Method 3: identity(6) + KeyframeSequenceProvider ──────────────
+    --  KFSProvider:GetKeyframeSequenceAsync is PluginSecurity (level 4+).
+    --  Identity 6 unlocks it cleanly in most executors.
+    if KFSProvider then
+        local kfs = withIdentity(6, function()
+            local ok, r = pcall(function()
+                return KFSProvider:GetKeyframeSequenceAsync("rbxassetid://" .. id)
+            end)
+            return (ok and isValidKFS(r)) and r or nil
+        end)
+        if kfs then return cache(kfs) end
+    end
+
+    -- ── Method 4: PlaceId spoof + GetObjects × 3 ──────────────────────
     local ownerPlaceId = manualPlaceId or lookupOwnerPlaceId(id)
     if ownerPlaceId then
         local spoofDelays = { 0, 0.5, 1.5 }
         for attempt = 1, 3 do
             local kfs = withSpoofedPlaceId(ownerPlaceId, tryGetObjects)
-            if kfs then KFSCache[id] = kfs; return kfs end
+            if kfs then return cache(kfs) end
             if attempt < 3 then task.wait(spoofDelays[attempt]) end
         end
     end
 
-    -- ── Method 3: KeyframeSequenceProvider (elevated-security executors)
-    if KFSProvider then
-        local ok2, kfs2 = pcall(function()
-            return KFSProvider:GetKeyframeSequenceAsync("rbxassetid://" .. id)
-        end)
-        if ok2 and isValidKFS(kfs2) then
-            KFSCache[id] = kfs2
-            return kfs2
+    -- ── Method 5: Plain GetObjects × 5 retries (exp. back-off) ────────
+    local delays = { 0, 0.3, 0.7, 1.5, 3.0 }
+    for attempt = 1, 5 do
+        local kfs = tryGetObjects()
+        if kfs then return cache(kfs) end
+        if attempt < 5 then task.wait(delays[attempt]) end
+    end
+
+    -- ── Method 6: GC scan ─────────────────────────────────────────────
+    --  If the game already loaded this animation somewhere, its KFS object
+    --  may still be alive in the Lua GC heap.  Scan for it.
+    if getgc then
+        local ok, gc = pcall(getgc, true)
+        if ok and gc then
+            for _, v in ipairs(gc) do
+                if typeof(v) == "Instance"
+                    and v:IsA("KeyframeSequence")
+                    and isValidKFS(v)
+                then
+                    return cache(v)
+                end
+            end
         end
     end
 
-    -- ── Method 4: Animator warm-up → re-fetch with spoof ──────────────
+    -- ── Method 7: Nil instance scan ───────────────────────────────────
+    --  Roblox sometimes parks loaded assets in nil-parented instances.
+    if getnilinstances then
+        local ok, nils = pcall(getnilinstances)
+        if ok and nils then
+            for _, v in ipairs(nils) do
+                if typeof(v) == "Instance"
+                    and v:IsA("KeyframeSequence")
+                    and isValidKFS(v)
+                then
+                    return cache(v)
+                end
+            end
+        end
+    end
+
+    -- ── Method 8: Animator warm-up + elevated re-fetch ────────────────
     pcall(function()
         local anim = Instance.new("Animation")
         anim.AnimationId = "rbxassetid://" .. id
         local animator = humanoid:FindFirstChildOfClass("Animator")
         if animator then pcall(function() animator:LoadAnimation(anim) end) end
     end)
-    task.wait(0.5)
-    local kfs4 = withSpoofedPlaceId(ownerPlaceId, tryGetObjects)
-    if kfs4 then KFSCache[id] = kfs4; return kfs4 end
+    task.wait(0.6)
+    do
+        local kfs = withIdentity(8, function()
+            return withSpoofedPlaceId(ownerPlaceId, tryGetObjects)
+        end)
+        if kfs then return cache(kfs) end
+    end
 
-    -- ── Method 5: Dummy pre-warm → final retry with spoof ─────────────
+    -- ── Method 9: Dummy pre-warm + identity(8) final retry ────────────
     pcall(function() game:GetObjects("rbxassetid://507776093") end)
-    task.wait(0.2)
-    local kfs5 = withSpoofedPlaceId(ownerPlaceId, tryGetObjects)
-    if kfs5 then KFSCache[id] = kfs5; return kfs5 end
+    task.wait(0.3)
+    do
+        local kfs = withIdentity(8, tryGetObjects)
+        if kfs then return cache(kfs) end
+    end
 
+    warn("[Animator6D] All 9 methods exhausted for id:", id)
     return nil
 end
 
