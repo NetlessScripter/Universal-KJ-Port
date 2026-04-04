@@ -1,3 +1,26 @@
+local Players = game:GetService("Players")
+
+local Player = Players.LocalPlayer
+local Character = Player.Character or Player.CharacterAdded:Wait()
+local Humanoid = Character:WaitForChild("Humanoid")
+
+if not getgenv().Animator6DLoadedPro then
+    loadstring(game:HttpGet("https://raw.githubusercontent.com/NetlessScripter/Universal-KJ-Port/refs/heads/main/Animation%20Module"))()
+end
+
+local cooldown = false
+
+    if cooldown then return end
+    cooldown = true
+    Humanoid.WalkSpeed = 0
+
+    getgenv().Animator6D(17141153099, 1, false)
+
+    task.delay(2, function()
+        Humanoid.WalkSpeed = 25
+        cooldown = false
+    end)
+
 --[[
 ================================================================================
   EXTRACTION ANALYSIS — StoicBomb_Apply.lua
