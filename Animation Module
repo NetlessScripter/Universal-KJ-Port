@@ -396,57 +396,70 @@ function AnimPlayer.new(rig, kfs)
     end
 
     self.map, self.lower = buildMotorMap(rig)
-    self.length  = self.frames[#self.frames].Time
-    self.time    = 0
-    self.speed   = 1
-    self.playing = false
-    self.savedC0 = {}
+    self.length     = self.frames[#self.frames].Time
+    self.time       = 0
+    self.speed      = 1
+    self.playing    = false
+    self.frameIndex = 1   -- tracked position; avoids linear search every frame
+    self.savedC0    = {}
 
     for _, motor in pairs(self.map) do
         self.savedC0[motor] = motor.C0
+    end
+
+    -- Pre-resolve every joint name → { motor, baseC0 } once at load time.
+    -- _sampleFrame then iterates this table with zero lookups per frame.
+    self.motorCache = {}
+    for _, frame in ipairs(self.frames) do
+        for joint in pairs(frame.Poses) do
+            if not self.motorCache[joint] then
+                local motor = findMotor(joint, self.map, self.lower)
+                if motor and self.savedC0[motor] then
+                    self.motorCache[joint] = { motor = motor, c0 = self.savedC0[motor] }
+                end
+            end
+        end
     end
 
     return self
 end
 
 function AnimPlayer:_sampleFrame()
-    local prevFrame = self.frames[1]
-    local nextFrame = self.frames[#self.frames]
+    local frames = self.frames
+    local n      = #frames
 
-    for i = 1, #self.frames - 1 do
-        if self.frames[i].Time <= self.time and self.frames[i+1].Time >= self.time then
-            prevFrame = self.frames[i]
-            nextFrame = self.frames[i+1]
-            break
-        end
+    -- Advance the tracked index forward instead of searching from index 1
+    -- every frame. This is O(1) amortized vs O(n) per frame.
+    while self.frameIndex < n - 1
+        and frames[self.frameIndex + 1].Time <= self.time do
+        self.frameIndex += 1
     end
 
+    local prevFrame = frames[self.frameIndex]
+    local nextFrame = frames[self.frameIndex + 1] or prevFrame
+
     local segLen = nextFrame.Time - prevFrame.Time
-    local alpha  = segLen > 0 and (self.time - prevFrame.Time) / segLen or 1
+    local alpha  = segLen > 0
+        and math.clamp((self.time - prevFrame.Time) / segLen, 0, 1)
+        or  1
 
-    local allJoints = {}
-    for j in pairs(prevFrame.Poses) do allJoints[j] = true end
-    for j in pairs(nextFrame.Poses) do allJoints[j] = true end
+    -- motorCache was built once in .new() — no findMotor, no table creation here
+    for joint, entry in next, self.motorCache do
+        local pPose = prevFrame.Poses[joint]
+        local nPose = nextFrame.Poses[joint]
 
-    for joint in pairs(allJoints) do
-        local motor = findMotor(joint, self.map, self.lower)
-        if motor and self.savedC0[motor] then
-            local pPose = prevFrame.Poses[joint]
-            local nPose = nextFrame.Poses[joint]
-            if pPose and nPose then
-                local ea = easingAlpha(
-                    alpha,
-                    nPose.EasingStyle     or Enum.EasingStyle.Linear,
-                    nPose.EasingDirection or Enum.EasingDirection.InOut
-                )
-                pcall(function()
-                    motor.C0 = self.savedC0[motor] * pPose.CFrame:Lerp(nPose.CFrame, ea)
-                end)
-            elseif pPose then
-                pcall(function() motor.C0 = self.savedC0[motor] * pPose.CFrame end)
-            elseif nPose then
-                pcall(function() motor.C0 = self.savedC0[motor] * nPose.CFrame end)
-            end
+        if pPose and nPose then
+            local ea = easingAlpha(
+                alpha,
+                nPose.EasingStyle     or Enum.EasingStyle.Linear,
+                nPose.EasingDirection or Enum.EasingDirection.InOut
+            )
+            -- Direct assignment — no pcall closure overhead in the hot path
+            entry.motor.C0 = entry.c0 * pPose.CFrame:Lerp(nPose.CFrame, ea)
+        elseif pPose then
+            entry.motor.C0 = entry.c0 * pPose.CFrame
+        elseif nPose then
+            entry.motor.C0 = entry.c0 * nPose.CFrame
         end
     end
 end
@@ -464,6 +477,7 @@ function AnimPlayer:Play(speed, looped)
         if self.time >= self.length then
             if self.looped then
                 self.time = self.time % self.length
+                self.frameIndex = 1   -- reset so the index scan restarts from frame 1
             else
                 self.time = self.length
                 self:_sampleFrame()
