@@ -486,10 +486,13 @@ function AnimPlayer:Stop(restore)
             pcall(function() motor.C0 = c0 end)
         end
     end
+    if self._completedCallback then
+        pcall(self._completedCallback)
+    end
 end
 
 -- ─────────────────────────────────────────────
---  Suppress default animations
+--  Suppress / restore default animations
 -- ─────────────────────────────────────────────
 local function suppressDefaultAnims(char)
     local animScript = char:FindFirstChild("Animate")
@@ -501,6 +504,25 @@ local function suppressDefaultAnims(char)
         end
     end
 end
+
+local function restoreDefaultAnims(char)
+    local animScript = char:FindFirstChild("Animate")
+    if animScript then
+        animScript.Disabled = false
+    end
+end
+
+-- ─────────────────────────────────────────────
+--  Animation.Completed signal
+--  Fires when a non-looped animation finishes.
+--  Usage:
+--    getgenv().Animation.Completed:Connect(function()
+--        print("done!")
+--    end)
+-- ─────────────────────────────────────────────
+local CompletedSignal = Instance.new("BindableEvent")
+getgenv().Animation = getgenv().Animation or {}
+getgenv().Animation.Completed = CompletedSignal.Event
 
 -- ─────────────────────────────────────────────
 --  Public API
@@ -526,11 +548,19 @@ getgenv().Animator6D = function(idOrInstance, speed, looped)
             warn("[Animator6D] AnimPlayer failed to build from Instance")
             return
         end
+
+        local isLooped = looped == nil and true or looped
+        if not isLooped then
+            anim._completedCallback = function()
+                restoreDefaultAnims(character)
+                CompletedSignal:Fire()
+            end
+        end
+
         getgenv().currentAnimator6D = anim
         anim:Play(speed or 1, looped)
 
     else
-        -- ID path — async so retries don't freeze the caller
         task.spawn(function()
             local fetched = loadKFS(idOrInstance)
             if not fetched then
@@ -551,6 +581,14 @@ getgenv().Animator6D = function(idOrInstance, speed, looped)
                 task.wait(1)
                 getgenv().Animator6D(idOrInstance, speed, looped)
                 return
+            end
+
+            local isLooped = looped == nil and true or looped
+            if not isLooped then
+                anim._completedCallback = function()
+                    restoreDefaultAnims(character)
+                    CompletedSignal:Fire()
+                end
             end
 
             getgenv().currentAnimator6D = anim
