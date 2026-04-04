@@ -3,6 +3,7 @@ getgenv().Animator6DLoadedPro = true
 
 local Players     = game:GetService("Players")
 local RunService  = game:GetService("RunService")
+local HttpService = game:GetService("HttpService")
 local KFSProvider = pcall(function() return game:GetService("KeyframeSequenceProvider") end)
     and game:GetService("KeyframeSequenceProvider") or nil
 
@@ -366,6 +367,73 @@ local function loadKFS(rawId)
 end
 
 -- ─────────────────────────────────────────────
+--  Disk cache helpers
+--  Serializes parsed frame data to JSON and
+--  writes to executor workspace.  On next run,
+--  if the ID matches the saved file the frames
+--  are loaded directly — no network fetch needed.
+-- ─────────────────────────────────────────────
+local function getCacheFilename(id)
+    return "anim6d_kfcache_" .. id .. ".json"
+end
+
+local function serializeFrames(frames, looped)
+    local out = { Loop = looped, Frames = {} }
+    for i, frame in ipairs(frames) do
+        local poses = {}
+        for joint, pose in pairs(frame.Poses) do
+            poses[joint] = {
+                CFrame          = { pose.CFrame:GetComponents() },
+                EasingStyle     = tostring(pose.EasingStyle):match("%.(%w+)$")     or "Linear",
+                EasingDirection = tostring(pose.EasingDirection):match("%.(%w+)$") or "Out",
+            }
+        end
+        out.Frames[i] = { Time = frame.Time, Poses = poses }
+    end
+    return out
+end
+
+local function deserializeFrames(data)
+    local frames = {}
+    for i, f in ipairs(data.Frames) do
+        local poses = {}
+        for joint, p in pairs(f.Poses) do
+            poses[joint] = {
+                CFrame          = CFrame.new(table.unpack(p.CFrame)),
+                EasingStyle     = Enum.EasingStyle[p.EasingStyle]         or Enum.EasingStyle.Linear,
+                EasingDirection = Enum.EasingDirection[p.EasingDirection] or Enum.EasingDirection.Out,
+            }
+        end
+        frames[i] = { Time = f.Time, Poses = poses }
+    end
+    return frames, data.Loop
+end
+
+local function writeAnimCache(id, frames, looped)
+    if not writefile then return end
+    local ok, encoded = pcall(HttpService.JSONEncode, HttpService, {
+        ID           = id,
+        KeyframeData = serializeFrames(frames, looped),
+    })
+    if ok and encoded then
+        pcall(writefile, getCacheFilename(id), encoded)
+    end
+end
+
+local function readAnimCache(id)
+    if not readfile or not isfile then return nil, nil end
+    local filename = getCacheFilename(id)
+    if not isfile(filename) then return nil, nil end
+    local ok, raw = pcall(readfile, filename)
+    if not ok or not raw or raw == "" then return nil, nil end
+    local ok2, data = pcall(HttpService.JSONDecode, HttpService, raw)
+    if not ok2 or not data then return nil, nil end
+    if tostring(data.ID) ~= tostring(id) then return nil, nil end
+    if not data.KeyframeData or not data.KeyframeData.Frames then return nil, nil end
+    return deserializeFrames(data.KeyframeData)
+end
+
+-- ─────────────────────────────────────────────
 --  R6 motor name remapping
 -- ─────────────────────────────────────────────
 local R6Map = {
@@ -555,7 +623,40 @@ function AnimPlayer.new(rig, kfs)
     return self
 end
 
-function AnimPlayer:_sampleFrame()
+-- Builds an AnimPlayer directly from pre-deserialized frames, bypassing
+-- parseSequence entirely. Used when loading from disk cache.
+function AnimPlayer.fromFrames(rig, frames, looped)
+    if not frames or #frames == 0 then return nil end
+    local self      = setmetatable({}, AnimPlayer)
+    self.rig        = rig
+    self.frames     = frames
+    self.looped     = looped
+    self.map, self.lower = buildMotorMap(rig)
+    self.length     = frames[#frames].Time
+    self.time       = 0
+    self.speed      = 1
+    self.playing    = false
+    self.frameIndex = 1
+    self.savedC0    = {}
+
+    for _, motor in pairs(self.map) do
+        self.savedC0[motor] = motor.C0
+    end
+
+    self.motorCache = {}
+    for _, frame in ipairs(self.frames) do
+        for joint in pairs(frame.Poses) do
+            if not self.motorCache[joint] then
+                local motor = findMotor(joint, self.map, self.lower)
+                if motor and self.savedC0[motor] then
+                    self.motorCache[joint] = { motor = motor, c0 = self.savedC0[motor] }
+                end
+            end
+        end
+    end
+
+    return self
+end
     local frames = self.frames
     local n      = #frames
 
@@ -736,6 +837,36 @@ getgenv().Animator6D = function(idOrInstance, speed, looped)
 
     else
         task.spawn(function()
+            local cId = cleanId(idOrInstance)
+
+            -- ── Disk cache check ──────────────────────────────────────────
+            --  If a cache file exists for this ID, build AnimPlayer directly
+            --  from the saved frames without hitting the network at all.
+            local cachedFrames, cachedLoop = readAnimCache(cId)
+            if cachedFrames then
+                suppressDefaultAnims(character)
+                if getgenv().currentAnimator6D then
+                    pcall(function() getgenv().currentAnimator6D:Stop(true) end)
+                    getgenv().currentAnimator6D = nil
+                end
+
+                local anim = AnimPlayer.fromFrames(character, cachedFrames, cachedLoop)
+                if anim then
+                    local isLooped = looped == nil and cachedLoop or looped
+                    if not isLooped then
+                        anim._completedCallback = function()
+                            restoreDefaultAnims(character)
+                            CompletedSignal:Fire()
+                        end
+                    end
+                    getgenv().currentAnimator6D = anim
+                    anim:Play(speed or 1, isLooped)
+                    return
+                end
+                -- cache was corrupt / unusable — fall through to fresh fetch
+            end
+
+            -- ── Fresh fetch ───────────────────────────────────────────────
             local fetched = loadKFS(idOrInstance)
             if not fetched then
                 warn("[Animator6D] All fetch methods failed for id:", idOrInstance)
@@ -756,6 +887,10 @@ getgenv().Animator6D = function(idOrInstance, speed, looped)
                 getgenv().Animator6D(idOrInstance, speed, looped)
                 return
             end
+
+            -- ── Write disk cache ──────────────────────────────────────────
+            --  Save the successfully parsed frames so future runs skip fetch.
+            writeAnimCache(cId, anim.frames, anim.looped or false)
 
             local isLooped = looped == nil and true or looped
             if not isLooped then
