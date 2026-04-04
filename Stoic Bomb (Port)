@@ -16,7 +16,7 @@ getgenv().Animator6D(17141153099, 1, false)
 
 -- Wait for the async loader to finish, then jump to 0.3s
 task.delay(0.01, function()
-    getgenv().Animator6DSetTime(0.3)
+    getgenv().Animator6DSetTime(0.5)
 end)
 
 task.delay(2, function()
