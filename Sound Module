@@ -546,9 +546,46 @@ getgenv().SoundEvent.Completed = CompletedSignal.Event
 local currentSound = nil
 
 -- ─────────────────────────────────────────────
---  Internal: spawn and play a validated sound.
---  urlOverride: if provided (e.g. from getcustomasset)
---  it is used instead of rbxassetid://<id>.
+--  Sound queue
+--  Each entry: { id, volume, looped }
+--  Sounds play sequentially — the next one starts
+--  only after the previous one ends.
+--  While a sound plays the next is preloaded in
+--  the background so there is no gap.
+-- ─────────────────────────────────────────────
+local soundQueue   = {}
+local queueRunning = false
+
+-- ─────────────────────────────────────────────
+--  Internal: resolve a sound ID to a URL.
+--  Reads disk cache and returns:
+--    nil      → use rbxassetid:// (fallback)
+--    <string> → local OGG path resolved via
+--               getsynasset / getcustomasset
+--  Also ensures SoundCache[id] is set.
+-- ─────────────────────────────────────────────
+local function resolveId(id)
+    local cached = readSoundCache(id)
+    if cached then
+        SoundCache[id] = true
+    end
+    if not SoundCache[id] then
+        local ok = loadSoundAsset(id)
+        if not ok then return nil, false end
+        cached = readSoundCache(id)
+    end
+    local g = getsynasset or getcustomasset
+    if type(cached) == "string" and g then
+        return g(cached), true
+    end
+    return nil, true   -- loaded but no local file; use rbxassetid://
+end
+
+-- ─────────────────────────────────────────────
+--  Internal: create, load and play a Sound.
+--  Returns the Sound instance on success, nil on
+--  failure. Does NOT block — caller decides
+--  whether to wait for Ended.
 -- ─────────────────────────────────────────────
 local function spawnSound(id, volume, looped, urlOverride)
     if currentSound then
@@ -563,7 +600,6 @@ local function spawnSound(id, volume, looped, urlOverride)
     sound.Looped  = looped == nil and false or looped
     sound.Parent  = workspace
 
-    -- Brief wait to ensure it's ready
     local deadline = tick() + 3
     while not sound.IsLoaded and tick() < deadline do
         task.wait(0.05)
@@ -572,7 +608,7 @@ local function spawnSound(id, volume, looped, urlOverride)
     if not sound.IsLoaded or sound.TimeLength == 0 then
         warn("[Sound6D] Sound failed to load for id:", id)
         sound:Destroy()
-        return
+        return nil
     end
 
     currentSound = sound
@@ -586,6 +622,53 @@ local function spawnSound(id, volume, looped, urlOverride)
             end
         end)
     end
+
+    return sound
+end
+
+-- ─────────────────────────────────────────────
+--  Queue processor
+--  Runs a single background thread that drains
+--  soundQueue one entry at a time.
+--  While a sound plays it preloads the next ID
+--  so resolution is already done when the
+--  current sound ends.
+-- ─────────────────────────────────────────────
+local function processQueue()
+    if queueRunning then return end
+    queueRunning = true
+
+    task.spawn(function()
+        while #soundQueue > 0 do
+            local item = table.remove(soundQueue, 1)
+            local id, volume, looped = item.id, item.volume, item.looped
+
+            -- Kick off preload for the next queued sound in the background.
+            if soundQueue[1] and not SoundCache[soundQueue[1].id] then
+                local nextId = soundQueue[1].id
+                task.spawn(function() loadSoundAsset(nextId) end)
+            end
+
+            -- Resolve this sound (load + get local URL if available).
+            local urlOverride, loaded = resolveId(id)
+            if not loaded then
+                warn("[Sound6D] Failed to load queued sound:", id)
+            else
+                if urlOverride then
+                    print("[Sound6D] Playing from local cache:", id)
+                end
+                local sound = spawnSound(id, volume, looped, urlOverride)
+                -- Wait for the sound to finish before playing the next.
+                -- Looped sounds are not waited on — they keep playing in
+                -- the background and the queue continues immediately.
+                if sound and not sound.Looped then
+                    sound.Ended:Wait()
+                end
+            end
+        end
+
+        queueRunning = false
+    end)
 end
 
 -- ─────────────────────────────────────────────
@@ -594,83 +677,39 @@ end
 getgenv().Sound6D = function(idOrInstance, volume, looped)
 
     if typeof(idOrInstance) == "Instance" then
-        -- Direct Sound instance provided
+        -- Direct Sound instance: play immediately, bypass queue.
         if not idOrInstance:IsA("Sound") then
             warn("[Sound6D] Provided Instance is not a Sound")
             return
         end
-
         if currentSound then
             pcall(function() currentSound:Stop() end)
             pcall(function() currentSound:Destroy() end)
             currentSound = nil
         end
-
         idOrInstance.Volume = volume or idOrInstance.Volume
         idOrInstance.Looped = looped == nil and idOrInstance.Looped or looped
         currentSound = idOrInstance
         idOrInstance:Play()
-
         if not idOrInstance.Looped then
             idOrInstance.Ended:Connect(function()
                 CompletedSignal:Fire()
-                if currentSound == idOrInstance then
-                    currentSound = nil
-                end
+                if currentSound == idOrInstance then currentSound = nil end
             end)
         end
 
     else
-        task.spawn(function()
-            local id = cleanId(idOrInstance)
-
-            -- ── Disk cache check ──────────────────────────────────────
-            --  readSoundCache returns:
-            --    false    → no cache, run the full loader
-            --    true     → cached (ID-only), use rbxassetid://
-            --    <string> → cached + local MP3 path, skip Roblox entirely
-            local cachedResult = readSoundCache(id)
-
-            if cachedResult then
-                SoundCache[id] = true
-
-                local g = getsynasset or getcustomasset
-                if type(cachedResult) == "string" and g then
-                    -- Load directly from the local MP3 — Roblox never contacted.
-                    local localUrl = g(cachedResult)
-                    print("[Sound6D] Playing from local cache:", cachedResult)
-                    spawnSound(id, volume, looped, localUrl)
-                else
-                    -- Cache hit but no local audio; use rbxassetid:// as before.
-                    spawnSound(id, volume, looped)
-                end
-                return
-            end
-
-            -- ── Validate / fetch ──────────────────────────────────────
-            --  writeSoundCache is called inside loadSoundAsset → cache()
-            --  so the MP3 is downloaded and JSON is written on first success.
-            local ok = loadSoundAsset(id)
-            if not ok then
-                warn("[Sound6D] All fetch methods failed for id:", idOrInstance)
-                return
-            end
-
-            -- After the first successful load the MP3 is now on disk.
-            -- Re-read the cache to get the local path for this session too.
-            local freshCache = readSoundCache(id)
-            local g = getsynasset or getcustomasset
-            if type(freshCache) == "string" and g then
-                local localUrl = g(freshCache)
-                spawnSound(id, volume, looped, localUrl)
-            else
-                spawnSound(id, volume, looped)
-            end
-        end)
+        -- Numeric/string ID: push to queue and let the processor handle it.
+        local id = cleanId(idOrInstance)
+        table.insert(soundQueue, { id = id, volume = volume, looped = looped })
+        processQueue()
     end
 end
 
 getgenv().Sound6DStop = function()
+    -- Clear the queue first so nothing else starts after the stop.
+    soundQueue   = {}
+    queueRunning = false
     if currentSound then
         pcall(function() currentSound:Stop() end)
         pcall(function() currentSound:Destroy() end)
