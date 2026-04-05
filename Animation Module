@@ -729,49 +729,40 @@ end
 
 function AnimPlayer:Play(speed, looped)
     if self.playing then return end
-    self.playing    = true
-    self.speed      = speed or 1
-    self.looped     = looped == nil and true or looped
-    self.time       = 0
-    self.frameIndex = 1
+    self.playing = true
+    self.speed   = speed or 1
+    self.looped  = looped == nil and true or looped
+    self.time    = 0
 
-    self.conn = task.spawn(function()
-        while self.playing do
-            local dt = RunService.RenderStepped:Wait()
-            if not self.playing then break end
-            self.time += dt * self.speed
-            if self.time >= self.length then
-                if self.looped then
-                    self.time       = self.time % self.length
-                    self.frameIndex = 1
-                else
-                    self.time = self.length
-                    self:_sampleFrame()
-                    self:Stop(true)
-                    return
-                end
+    self.conn = RunService.RenderStepped:Connect(function(dt)
+        if not self.playing then return end
+        self.time += dt * self.speed
+        if self.time >= self.length then
+            if self.looped then
+                self.time = self.time % self.length
+                self.frameIndex = 1   -- reset so the index scan restarts from frame 1
+            else
+                self.time = self.length
+                self:_sampleFrame()
+                self:Stop(true)
+                return
             end
-            self:_sampleFrame()
         end
+        self:_sampleFrame()
     end)
 end
 
 function AnimPlayer:Stop(restore)
     self.playing = false
-
     if self.conn then
-        if coroutine.running() ~= self.conn then
-            task.cancel(self.conn)
-        end
+        self.conn:Disconnect()
         self.conn = nil
     end
-
     if restore then
         for motor, c0 in pairs(self.savedC0) do
             pcall(function() motor.C0 = c0 end)
         end
     end
-
     if self._completedCallback then
         pcall(self._completedCallback)
     end
@@ -825,12 +816,7 @@ getgenv().Animator6D = function(idOrInstance, speed, looped)
 
         suppressDefaultAnims(character)
         if getgenv().currentAnimator6D then
-            -- Stop(false): don't blend-out to rest here.  The new animation's
-            -- blend-in will crossfade from the current motor pose.  Stop(true)
-            -- would spawn a blend-out thread that fights the incoming blend-in,
-            -- causing the motors to get written by two coroutines simultaneously
-            -- and producing a completely distorted/collapsed character pose.
-            pcall(function() getgenv().currentAnimator6D:Stop(false) end)
+            pcall(function() getgenv().currentAnimator6D:Stop(true) end)
             getgenv().currentAnimator6D = nil
         end
 
@@ -862,7 +848,7 @@ getgenv().Animator6D = function(idOrInstance, speed, looped)
             if cachedFrames then
                 suppressDefaultAnims(character)
                 if getgenv().currentAnimator6D then
-                    pcall(function() getgenv().currentAnimator6D:Stop(false) end)
+                    pcall(function() getgenv().currentAnimator6D:Stop(true) end)
                     getgenv().currentAnimator6D = nil
                 end
 
@@ -891,7 +877,7 @@ getgenv().Animator6D = function(idOrInstance, speed, looped)
 
             suppressDefaultAnims(character)
             if getgenv().currentAnimator6D then
-                pcall(function() getgenv().currentAnimator6D:Stop(false) end)
+                pcall(function() getgenv().currentAnimator6D:Stop(true) end)
                 getgenv().currentAnimator6D = nil
             end
 
