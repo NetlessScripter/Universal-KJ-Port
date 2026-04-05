@@ -813,10 +813,6 @@ function AnimPlayer:Stop(restore)
     self.playing = false
 
     if self.conn then
-        -- If Stop() is being called from WITHIN the play thread itself
-        -- (natural animation end), don't cancel our own coroutine — the
-        -- return statement in Play() exits it cleanly.  Only cancel when
-        -- an external caller is forcing the animation to stop early.
         if coroutine.running() ~= self.conn then
             task.cancel(self.conn)
         end
@@ -824,37 +820,13 @@ function AnimPlayer:Stop(restore)
     end
 
     if restore then
-        -- Capture the pose we're currently in so we can lerp away from it.
-        local blendFrom = {}
-        for motor in pairs(self.savedC0) do
-            blendFrom[motor] = motor.C0
+        for motor, c0 in pairs(self.savedC0) do
+            pcall(function() motor.C0 = c0 end)
         end
-        local savedC0  = self.savedC0
-        local callback = self._completedCallback
-        -- Blend-out runs in its own thread so Stop() returns immediately.
-        task.spawn(function()
-            local elapsed = 0
-            while elapsed < BLEND_TIME do
-                local dt = RunService.RenderStepped:Wait()
-                elapsed += dt
-                local t     = math.clamp(elapsed / BLEND_TIME, 0, 1)
-                local alpha = 1 - (1 - t) * (1 - t)   -- Quad-Out
-                for motor, c0 in pairs(savedC0) do
-                    pcall(function()
-                        motor.C0 = blendFrom[motor]:Lerp(c0, alpha)
-                    end)
-                end
-            end
-            -- Final snap to exact rest pose once the lerp finishes.
-            for motor, c0 in pairs(savedC0) do
-                pcall(function() motor.C0 = c0 end)
-            end
-            if callback then pcall(callback) end
-        end)
-    else
-        if self._completedCallback then
-            pcall(self._completedCallback)
-        end
+    end
+
+    if self._completedCallback then
+        pcall(self._completedCallback)
     end
 end
 
