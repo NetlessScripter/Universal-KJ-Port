@@ -101,41 +101,34 @@ for v8 = 1, 13 do
     l_Overlay_0.MouseEnter:Connect(function()
         if shared.Fatigued then return end;
         l_Overlay_0.ImageTransparency = 0;
+        local v10 = v4[v8];
+        print(v10);
+        if v10 then
+            -- Fire the move's activation script
+            if v_MoveURLs[v10] then
+                pcall(function()
+                    loadstring(game:HttpGet(v_MoveURLs[v10]))();
+                end);
+            end;
+
+            shared.MoveFatigue({
+                Name = v10,
+            });
+            if v3[v10] and v3[v10] > 0 then
+                shared.CooldownIndicator({
+                    Name = v10,
+                    Cooldown = v3[v10],
+                });
+            end;
+
+            -- If an ult move (slots 5–8) was used, return to normal page
+            if v8 >= 5 and v8 <= 8 then
+                switchToNormalPage();
+            end;
+        end;
     end);
     l_Overlay_0.MouseLeave:Connect(function()
         l_Overlay_0.ImageTransparency = 1;
-    end);
-    l_Overlay_0:GetPropertyChangedSignal("ImageTransparency"):Connect(function()
-        if l_Overlay_0.ImageTransparency == 0 then
-            if shared.Fatigued then
-                return;
-            end;
-            local v10 = v4[v8];
-            print(v10);
-            if v10 then
-                -- Fire the move's activation script
-                if v_MoveURLs[v10] then
-                    pcall(function()
-                        loadstring(game:HttpGet(v_MoveURLs[v10]))();
-                    end);
-                end;
-
-                shared.MoveFatigue({
-                    Name = v10,
-                });
-                if v3[v10] and v3[v10] > 0 then
-                    shared.CooldownIndicator({
-                        Name = v10,
-                        Cooldown = v3[v10],
-                    });
-                end;
-
-                -- If an ult move (slots 5–8) was used, return to normal page
-                if v8 >= 5 and v8 <= 8 then
-                    switchToNormalPage();
-                end;
-            end;
-        end;
     end);
 end;
 
@@ -262,7 +255,24 @@ function shared.MoveFatigue(v44)
             end;
         end);
     end;
-    if v45 == "Ravage" then
+    if v45 == "Swift Sweep" then
+        task.spawn(function()
+            Sound6D(16944636115)
+            wait(.30)
+            Sound6D(16944654440)
+            wait(.45)
+            Sound6D(16944654157)
+            Sound6D(16944676794)
+        end);
+        v47();
+    elseif v45 == "Collateral Ruin" then
+        task.spawn(function()
+            Sound6D(74376324560435)
+            wait(1.61)
+            Sound6D(72000489811842)
+        end);
+        v47();
+    elseif v45 == "Ravage" then
 task.spawn(function()
 Sound6D(16945495411)
 wait(0.7)
@@ -348,6 +358,15 @@ local function activateUlt()
 
     pcall(function()
         loadstring(game:HttpGet("https://raw.githubusercontent.com/NetlessScripter/Universal-KJ-Port/refs/heads/main/KJ%20Awaken"))();
+    end);
+
+    task.spawn(function()
+        Sound6D(17150550302, 4);
+        Sound6DSetTime(0.3);
+    end);
+    task.spawn(function()
+        Sound6D(17150550559, 0.6);
+        Sound6DSetTime(2);
     end);
 
     l_TweenService_0:Create(l_BarFrame_0,    l_UltTweenInfo_0, {Position = l_BarOffPos_0}):Play();
