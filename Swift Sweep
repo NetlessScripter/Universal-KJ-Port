@@ -1,0 +1,307 @@
+--[[
+================================================================================
+  EXTRACTION ANALYSIS — SwiftSweep_Apply.lua
+================================================================================
+
+  SOURCE
+  ------
+  Stripped from tsb_interpreter.txt — the full TSB (The Strongest Battlegrounds)
+  LocalScript, deobfuscated from bytecode (~149,235 lines).
+
+  EFFECTS KEPT
+  ------------
+    "Swift Sweep"  — dual-branch effect (interpreter lines 21095–21163)
+      Branch A: Hit = true  → FollowUpCresc + SweepHitMesh + LegSweepHit particle
+      Branch B: Hit = false → SweepCresc arc + particlespinner ground sweep
+
+  ANIMATION CHECK — REMOVED
+  -------------------------
+  Swift Sweep had NO traditional animation gate (no GetPlayingAnimationTracks
+  check at the top of the block). The VFX body fires unconditionally based on
+  the v1090.Hit parameter alone. No changes needed to strip a gate.
+
+  DEPENDENCIES INCLUDED
+  ----------------------
+    v10   TweenService
+    v1058 effects-cache / maid factory  (lines 6655–6733)
+    v1059 FollowUpKick keyframe data    (lines 6734–6770)
+    v1075 decal-weld VFX helper         (lines 6771–6806)
+
+  STRIPPED
+  --------
+    Animation gate (none present — confirmed)
+    v6 vararg shim, script.Parent cleanup
+    All other v12 effect blocks
+    All unrelated globals (v95, v102, v313, v294, v472, etc.)
+    shared.* stubs not referenced by this effect
+
+  ENTRY POINT
+  -----------
+    Fires v12({ Effect = "Swift Sweep", Character = character })
+    Miss branch fires immediately; hit branch fires automatically 0.3s later.
+    No Hit parameter — both branches always run in sequence.
+
+================================================================================
+]]
+
+-- ============================================================
+-- GLOBALS
+-- ============================================================
+local v10 = game:GetService("TweenService");
+local v12 = nil;
+
+-- ============================================================
+-- v1058: effects-cache / maid factory
+-- ============================================================
+local function v1058(v1035, v1036, v1037) --[[ Line: 4786 ]]
+    local v1038 = {};
+    for _, v1040 in pairs(v1035:GetChildren()) do
+        v1038[v1040.Name] = v1040;
+    end;
+    local v1048 = setmetatable({}, {
+        __index = function(_, v1042) --[[ Line: 4793 ]]
+            return {
+                Clone = function(_)
+                    local v1044 = rawget(v1038, v1042):Clone();
+                    if not table.find(v1036, v1044) then
+                        table.insert(v1036, v1044);
+                    end;
+                    return v1044;
+                end,
+                GetChildren = function(_)
+                    return rawget(v1038, v1042):GetChildren();
+                end,
+                GetAttribute = function(_, v1047)
+                    return rawget(v1038, v1042):GetAttribute(v1047);
+                end
+            };
+        end
+    });
+    local v1049 = {
+        _maid = {}
+    };
+    local function v1052(_, v1051)
+        if not table.find(v1036, v1051) then
+            table.insert(v1036, v1051);
+        end;
+        return v1051;
+    end;
+    v1049._maid.give = v1052;
+    v1052 = function(_, v1054)
+        if not table.find(v1036, v1054) then
+            table.insert(v1036, v1054);
+        end;
+        return v1054;
+    end;
+    v1049._maid.giveTask = v1052;
+    v1052 = function()
+        if v1048 and v1049 then
+            table.clear(v1048);
+            table.clear(v1049);
+        end;
+        if v1038 then
+            table.clear(v1038);
+            v1038 = nil;
+        end;
+        v1049 = nil;
+        v1048 = nil;
+        if v1036 then
+            for v1055, v1056 in pairs(v1036) do
+                if typeof(v1056) == "RBXScriptConnection" then
+                    v1056:Disconnect();
+                elseif typeof(v1056) == "Instance" then
+                    v1056:Destroy();
+                end;
+                v1036[v1055] = nil;
+            end;
+            table.clear(v1036);
+        end;
+        v1036 = nil;
+    end;
+    local v1057 = 10;
+    if v1037 ~= nil and typeof(v1037) == "number" then
+        v1057 = v1037;
+    end;
+    task.delay(v1057, v1052);
+    return v1048, v1049, v1052;
+end;
+
+-- ============================================================
+-- v1059: FollowUpKick keyframe data (used by v1075)
+-- ============================================================
+local v1059 = {
+    FollowUpKick = {
+        Length = 0.383,
+        CF = {
+            {
+                Time = 0,
+                Value = CFrame.new(-0.4329986572265625, -0.7049999237060547, -0.173004150390625) * CFrame.Angles(-2.931734264329995, 0.7261442352922407, -0.56327010949613)
+            },
+            {
+                Time = 0.05,
+                Value = CFrame.new(-0.4329986572265625, -0.7049999237060547, -0.173004150390625) * CFrame.Angles(-2.931734264329995, 0.7261442352922407, -0.56327010949613)
+            },
+            {
+                Time = 0.25,
+                Value = CFrame.new(-0.4329986572265625, -0.7049999237060547, -0.173004150390625) * CFrame.Angles(0.37625808014493756, -0.8867843396457988, -2.6789756820561763)
+            },
+            {
+                Time = 0.383,
+                Value = CFrame.new(-0.4329986572265625, -0.7049999237060547, -0.173004150390625) * CFrame.Angles(-2.5432239728360573, 1.085315542060154, -0.6489657757690516)
+            }
+        },
+        Transparency = {
+            {
+                Time = 0,
+                Value = 1
+            },
+            {
+                Time = 0.35,
+                Value = 0.5
+            },
+            {
+                Time = 0.383,
+                Value = 1
+            }
+        }
+    }
+};
+
+-- ============================================================
+-- v1075: decal-weld VFX helper
+-- ============================================================
+local function v1075(v1060, v1061, v1062, v1063) --[[ Line: 4909 ]]
+    local v1064 = v1062 or 1;
+    local v1065 = v1059[v1061];
+    local v1066 = v1063:Clone();
+    v1066.Parent = workspace.Thrown;
+    v1066:WaitForChild("Weld").Part0 = v1060:WaitForChild("HumanoidRootPart");
+    v1066.Decal.Transparency = 1;
+    v1066.Weld.C0 = v1065.CF[1].Value;
+    for v1067, v1068 in pairs(v1065.CF) do
+        local v1069 = v1068.Time - (v1065.CF[v1067 - 1] and v1065.CF[v1067 - 1].Time or 0);
+        local v1070 = v1065.CF[v1067 - 1] and v1065.CF[v1067 - 1].Time or 0;
+        task.delay(v1070 / v1064, function()
+            v10:Create(v1066.Weld, TweenInfo.new(v1069 / v1064, Enum.EasingStyle.Linear), {
+                C0 = v1068.Value
+            }):Play();
+        end);
+    end;
+    for v1071, v1072 in pairs(v1065.Transparency) do
+        local v1073 = v1072.Time - (v1065.Transparency[v1071 - 1] and v1065.Transparency[v1071 - 1].Time or 0);
+        local v1074 = v1065.Transparency[v1071 - 1] and v1065.Transparency[v1071 - 1].Time or 0;
+        task.delay(v1074 / v1064, function()
+            v10:Create(v1066.Decal, TweenInfo.new(v1073 / v1064, Enum.EasingStyle.Linear), {
+                Transparency = v1072.Value
+            }):Play();
+        end);
+    end;
+    task.delay(v1065.Length / v1064, function()
+        v1066:Destroy();
+    end);
+end;
+
+-- ============================================================
+-- v12: EFFECT DISPATCHER
+-- ============================================================
+v12 = function(v1090)
+    local v1091 = v1090.Effect;
+
+    if v1091 == "Swift Sweep" then
+        local l_Character_14 = v1090.Character;
+        local _ = l_Character_14.HumanoidRootPart;
+        local v4267 = {};
+        local v4268, _ = v1058(game.ReplicatedStorage.Resources.KJEffects, v4267, 5);
+
+        -- ── MISS (sweep arc + ground spinner) fires immediately ──
+        local v4273 = v4268.SweepCresc:Clone();
+        v4273.CFrame = l_Character_14.HumanoidRootPart.CFrame * CFrame.new(0, -2.632, 0) * CFrame.Angles(0, 0.6981317007977318, 3.141592653589793);
+        v4273.Parent = workspace.Thrown;
+        v10:Create(v4273.Decal, TweenInfo.new(0.133, Enum.EasingStyle.Linear), {
+            Transparency = 0.8
+        }):Play();
+        local l_v4273_0 = v4273;
+        task.delay(0.133, function() --[[ Line: 14078 ]]
+            v10:Create(l_v4273_0.Decal, TweenInfo.new(0.217, Enum.EasingStyle.Linear), {
+                Transparency = 1
+            }):Play();
+        end);
+        v10:Create(v4273, TweenInfo.new(0.183, Enum.EasingStyle.Linear), {
+            CFrame = l_Character_14.HumanoidRootPart.CFrame * CFrame.new(0, -2.632, 0) * CFrame.Angles(0, 2.6179938779914944, 3.141592653589793)
+        }):Play();
+        local l_l_Character_14_0 = l_Character_14;
+        task.delay(0.183, function() --[[ Line: 14097 ]]
+            v10:Create(l_v4273_0, TweenInfo.new(0.167, Enum.EasingStyle.Linear), {
+                CFrame = l_l_Character_14_0.HumanoidRootPart.CFrame * CFrame.new(0, -2.632, 0) * CFrame.Angles(0, 4.886921905584122, 3.141592653589793)
+            }):Play();
+        end);
+        local l_v4268_0 = v4268;
+        task.delay(0.033, function() --[[ Line: 14108 ]]
+            local v4277 = l_v4268_0.particlespinner:Clone();
+            v4277.CFrame = l_l_Character_14_0.HumanoidRootPart.CFrame * CFrame.new(0, -3, 0) * CFrame.Angles(0, 0.1484577061746377, 0);
+            v4277.Parent = workspace.Thrown;
+            v4277.Attachment.ParticleEmitter.Enabled = true;
+            v4277.Attachment.rocks.Enabled = true;
+            v10:Create(v4277, TweenInfo.new(0.167, Enum.EasingStyle.Linear), {
+                CFrame = l_l_Character_14_0.HumanoidRootPart.CFrame * CFrame.new(0, -2.632, 0) * CFrame.Angles(0, 2.9670597283903604, 0)
+            }):Play();
+            task.delay(0.167, function() --[[ Line: 14127 ]]
+                v4277.Attachment.ParticleEmitter.Enabled = false;
+                v4277.Attachment.rocks.Enabled = false;
+                game:GetService("Debris"):AddItem(v4277, 9);
+            end);
+        end);
+
+        -- ── HIT (cresc + mesh + particle) fires 0.15s after miss ──
+        task.delay(0.15, function()
+            local v4270 = v4268.FollowUpCresc:Clone();
+            local v4271 = v4268.SweepHitMesh:Clone();
+            v4271.CFrame = l_Character_14.HumanoidRootPart.CFrame * CFrame.new(2.16400146484375, -2.9619998931884766, -4.4180297851562) * CFrame.Angles(0, 0, -1.5707963267948966);
+            v4271.Parent = workspace.Thrown;
+            v10:Create(v4271.Mesh, TweenInfo.new(0.133, Enum.EasingStyle.Linear), {
+                Scale = Vector3.new(0, 20, 0, 0)
+            }):Play();
+            v10:Create(v4271, TweenInfo.new(0.133, Enum.EasingStyle.Linear), {
+                CFrame = l_Character_14.HumanoidRootPart.CFrame * CFrame.new(0.5640029907226562, -2.9619998931884766, -4.41802978515625) * CFrame.Angles(0, 0, -1.5707963267948966)
+            }):Play();
+            task.delay(0.083, function() --[[ Line: 14045 ]]
+                local v4272 = game.ReplicatedStorage.Resources.KJEffects.LegSweepHit.Hit:Clone();
+                table.insert(v4267, v4272);
+                v4272.Parent = l_Character_14.HumanoidRootPart;
+                v4272["15"]:Emit(v4272["15"].Name);
+                game:GetService("Debris"):AddItem(v4272, 0.5);
+            end);
+            v1075(l_Character_14, "FollowUpKick", 1, v4270);
+        end);
+    end
+end
+
+-- ============================================================
+-- ENTRY POINT
+-- ============================================================
+local player    = game.Players.LocalPlayer;
+local character = player.Character or player.CharacterAdded:Wait();
+local humanoid  = character:WaitForChild("Humanoid");
+
+-- Load animation module (matches Stoic Bomb port pattern)
+if not getgenv().Animator6DLoadedPro then
+    loadstring(game:HttpGet("https://raw.githubusercontent.com/NetlessScripter/Universal-KJ-Port/refs/heads/main/Animation%20Module"))()
+end
+
+-- Play first animation (sweep/miss) immediately
+humanoid.WalkSpeed = 0;
+getgenv().Animator6D(16944265635, 1, false);
+
+-- Play hit animation at 0.15s alongside the first (does not stop it)
+task.delay(0.15, function()
+    getgenv().Animator6D(16944345619, 1, false);
+end);
+
+task.delay(2, function()
+    humanoid.WalkSpeed = 16;
+end);
+
+v12({
+    Effect    = "Swift Sweep",
+    Character = character,
+});
