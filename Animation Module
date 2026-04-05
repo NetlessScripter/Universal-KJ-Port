@@ -751,17 +751,26 @@ function AnimPlayer:Play(speed, looped)
         blendStart[joint] = entry.motor.C0
     end
 
-    -- Pre-sample frame 0 to find out what the blend target should be.
-    self:_sampleFrame()
-    local blendTarget = {}
-    for joint, entry in next, self.motorCache do
-        blendTarget[joint] = entry.motor.C0
-    end
-
     -- RenderStepped:Wait() inside task.spawn gives us one clean resume
     -- per render step.  Unlike :Connect, this never piles up callbacks
     -- when a frame is slow, which is what causes the 12fps stutter.
     self.conn = task.spawn(function()
+
+        -- ── Compute blend target on the first frame ────────────────────
+        -- We do this INSIDE the thread so _sampleFrame() never writes to
+        -- motor.C0 before the blend-in starts (the old pre-spawn call was
+        -- causing the character to snap into the first keyframe immediately).
+        self:_sampleFrame()
+        local blendTarget = {}
+        for joint, entry in next, self.motorCache do
+            blendTarget[joint] = entry.motor.C0
+        end
+        -- Restore to blendStart so the snap is undone on this same frame.
+        for joint, entry in next, self.motorCache do
+            if blendStart[joint] then
+                entry.motor.C0 = blendStart[joint]
+            end
+        end
 
         -- ── Blend-in: lerp current pose → first keyframe ──────────────
         local blendElapsed = 0
