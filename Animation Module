@@ -657,6 +657,8 @@ function AnimPlayer.fromFrames(rig, frames, looped)
 
     return self
 end
+
+function AnimPlayer:_sampleFrame()
     local frames = self.frames
     local n      = #frames
 
