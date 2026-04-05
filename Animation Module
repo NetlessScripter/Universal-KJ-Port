@@ -579,6 +579,15 @@ local function easingAlpha(alpha, style, direction)
 end
 
 -- ─────────────────────────────────────────────
+--  Blend config
+--  Time in seconds to lerp in/out at the start
+--  and end of every animation, matching what
+--  Roblox's native AnimationTrack:Play(fadeTime)
+--  and :Stop(fadeTime) do internally.
+-- ─────────────────────────────────────────────
+local BLEND_TIME = 0.15   -- seconds
+
+-- ─────────────────────────────────────────────
 --  AnimPlayer
 -- ─────────────────────────────────────────────
 local AnimPlayer = {}
@@ -729,42 +738,114 @@ end
 
 function AnimPlayer:Play(speed, looped)
     if self.playing then return end
-    self.playing = true
-    self.speed   = speed or 1
-    self.looped  = looped == nil and true or looped
-    self.time    = 0
+    self.playing    = true
+    self.speed      = speed or 1
+    self.looped     = looped == nil and true or looped
+    self.time       = 0
+    self.frameIndex = 1
 
-    self.conn = RunService.RenderStepped:Connect(function(dt)
-        if not self.playing then return end
-        self.time += dt * self.speed
-        if self.time >= self.length then
-            if self.looped then
-                self.time = self.time % self.length
-                self.frameIndex = 1   -- reset so the index scan restarts from frame 1
-            else
-                self.time = self.length
-                self:_sampleFrame()
-                self:Stop(true)
-                return
+    -- Capture whatever pose the motors are in RIGHT NOW so we can
+    -- blend from it instead of snapping to the first keyframe.
+    local blendStart = {}
+    for joint, entry in next, self.motorCache do
+        blendStart[joint] = entry.motor.C0
+    end
+
+    -- Pre-sample frame 0 to find out what the blend target should be.
+    self:_sampleFrame()
+    local blendTarget = {}
+    for joint, entry in next, self.motorCache do
+        blendTarget[joint] = entry.motor.C0
+    end
+
+    -- RenderStepped:Wait() inside task.spawn gives us one clean resume
+    -- per render step.  Unlike :Connect, this never piles up callbacks
+    -- when a frame is slow, which is what causes the 12fps stutter.
+    self.conn = task.spawn(function()
+
+        -- ── Blend-in: lerp current pose → first keyframe ──────────────
+        local blendElapsed = 0
+        while blendElapsed < BLEND_TIME do
+            local dt = RunService.RenderStepped:Wait()
+            if not self.playing then return end
+            blendElapsed += dt
+            -- Quad-Out so the transition decelerates into the pose
+            local t     = math.clamp(blendElapsed / BLEND_TIME, 0, 1)
+            local alpha = 1 - (1 - t) * (1 - t)
+            for joint, entry in next, self.motorCache do
+                if blendStart[joint] and blendTarget[joint] then
+                    entry.motor.C0 = blendStart[joint]:Lerp(blendTarget[joint], alpha)
+                end
             end
         end
-        self:_sampleFrame()
+
+        -- ── Main playback loop: one RenderStepped:Wait() per frame ────
+        while self.playing do
+            local dt = RunService.RenderStepped:Wait()
+            if not self.playing then break end
+            self.time += dt * self.speed
+            if self.time >= self.length then
+                if self.looped then
+                    self.time       = self.time % self.length
+                    self.frameIndex = 1
+                else
+                    self.time = self.length
+                    self:_sampleFrame()
+                    self:Stop(true)
+                    return
+                end
+            end
+            self:_sampleFrame()
+        end
     end)
 end
 
 function AnimPlayer:Stop(restore)
     self.playing = false
+
     if self.conn then
-        self.conn:Disconnect()
+        -- If Stop() is being called from WITHIN the play thread itself
+        -- (natural animation end), don't cancel our own coroutine — the
+        -- return statement in Play() exits it cleanly.  Only cancel when
+        -- an external caller is forcing the animation to stop early.
+        if coroutine.running() ~= self.conn then
+            task.cancel(self.conn)
+        end
         self.conn = nil
     end
+
     if restore then
-        for motor, c0 in pairs(self.savedC0) do
-            pcall(function() motor.C0 = c0 end)
+        -- Capture the pose we're currently in so we can lerp away from it.
+        local blendFrom = {}
+        for motor in pairs(self.savedC0) do
+            blendFrom[motor] = motor.C0
         end
-    end
-    if self._completedCallback then
-        pcall(self._completedCallback)
+        local savedC0  = self.savedC0
+        local callback = self._completedCallback
+        -- Blend-out runs in its own thread so Stop() returns immediately.
+        task.spawn(function()
+            local elapsed = 0
+            while elapsed < BLEND_TIME do
+                local dt = RunService.RenderStepped:Wait()
+                elapsed += dt
+                local t     = math.clamp(elapsed / BLEND_TIME, 0, 1)
+                local alpha = 1 - (1 - t) * (1 - t)   -- Quad-Out
+                for motor, c0 in pairs(savedC0) do
+                    pcall(function()
+                        motor.C0 = blendFrom[motor]:Lerp(c0, alpha)
+                    end)
+                end
+            end
+            -- Final snap to exact rest pose once the lerp finishes.
+            for motor, c0 in pairs(savedC0) do
+                pcall(function() motor.C0 = c0 end)
+            end
+            if callback then pcall(callback) end
+        end)
+    else
+        if self._completedCallback then
+            pcall(self._completedCallback)
+        end
     end
 end
 
