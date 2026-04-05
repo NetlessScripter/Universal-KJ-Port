@@ -171,31 +171,80 @@ end
 -- ─────────────────────────────────────────────
 --  Disk cache helpers
 --
---  writeSoundCache: fetches the raw audio binary
---  from Roblox's CDN, saves it as an MP3 file,
---  then writes a JSON record:
---    { SoundID = id, Sound = "sound6d_<id>.mp3" }
+--  Files are named after the sound's actual name
+--  on Roblox (e.g. "Cool Song.mp3", "Cool Song.json")
+--  rather than a generic ID-based name.
 --
---  On any future run, readSoundCache returns the
---  local MP3 path and the sound is loaded from
---  disk via getcustomasset — Roblox's asset
---  pipeline is never contacted again.
+--  sound6d_index.json  →  { ["<id>"] = "<SoundName>" }
+--    Lets readSoundCache look up the right filename
+--    from just the ID on future runs.
+--
+--  <SoundName>.mp3     →  raw audio binary from CDN
+--  <SoundName>.json    →  { SoundID = id, Sound = "<SoundName>.mp3" }
+--
+--  On any future run readSoundCache finds the name
+--  via the index, reads the JSON, and returns the
+--  MP3 path — Roblox's asset pipeline is never
+--  contacted again.
 -- ─────────────────────────────────────────────
-local function getCacheFilename(id)
-    return "sound6d_cache_" .. id .. ".json"
+
+-- Strips characters that are invalid in filenames and trims whitespace.
+local function sanitizeName(name)
+    return tostring(name)
+        :gsub('[<>:"/\\|?*%c]', "_")
+        :gsub("^%s+", "")
+        :gsub("%s+$", "")
+        :sub(1, 80)
 end
 
-local function getMp3Filename(id)
-    return "sound6d_" .. id .. ".mp3"
+-- Fetch the human-readable name of an asset from Roblox's economy API.
+-- Returns a sanitized string, or nil if the request fails.
+local function fetchSoundName(id)
+    local details = httpGet(
+        "https://economy.roblox.com/v2/assets/" .. id .. "/details"
+    )
+    if not details then return nil end
+    local name = details:match('"Name":"([^"]+)"')
+    return name and sanitizeName(name) or nil
 end
 
+-- ── Index helpers ─────────────────────────────────────────────────
+--  sound6d_index.json stores { id = soundName } so we can
+--  reconstruct the filename on the next run without an API call.
+local INDEX_FILE = "sound6d_index.json"
+
+local function readIndex()
+    if not readfile or not isfile then return {} end
+    if not isfile(INDEX_FILE) then return {} end
+    local ok, raw = pcall(readfile, INDEX_FILE)
+    if not ok or not raw or raw == "" then return {} end
+    local ok2, data = pcall(HttpService.JSONDecode, HttpService, raw)
+    return (ok2 and type(data) == "table" and data) or {}
+end
+
+local function writeIndex(id, soundName)
+    if not writefile then return end
+    local index = readIndex()
+    index[tostring(id)] = soundName
+    local ok, encoded = pcall(HttpService.JSONEncode, HttpService, index)
+    if ok and encoded then
+        pcall(writefile, INDEX_FILE, encoded)
+    end
+end
+
+-- ── Write ─────────────────────────────────────────────────────────
 local function writeSoundCache(id)
     if not writefile then return end
 
-    -- Attempt to download the raw audio binary from the CDN.
-    -- The delivery endpoint returns whatever format was originally
-    -- uploaded (commonly OGG/MP3); we write it as .mp3 regardless
-    -- since executors treat the extension as a hint, not a codec check.
+    -- Resolve a human-readable name; fall back to the raw ID so we
+    -- always have something valid to use as a filename.
+    local soundName = fetchSoundName(id) or ("sound6d_" .. id)
+    local mp3File   = soundName .. ".mp3"
+    local jsonFile  = soundName .. ".json"
+
+    -- Download the raw audio binary from the CDN.
+    -- The delivery endpoint returns whatever was originally uploaded
+    -- (OGG or MP3); executors treat the .mp3 extension as a hint only.
     local audioData = nil
     local cdnEndpoints = {
         "https://assetdelivery.roblox.com/v1/asset?id="  .. id,
@@ -215,13 +264,14 @@ local function writeSoundCache(id)
         end
     end
 
-    -- Write the MP3 to disk and verify it landed.
-    local mp3Filename = nil
+    -- Write the MP3 to disk and verify it actually landed.
+    local savedMp3 = nil
     if audioData then
-        local target = getMp3Filename(id)
-        local writeOk = pcall(writefile, target, audioData)
-        if writeOk and isfile and isfile(target) then
-            mp3Filename = target
+        if not isfile(mp3File) then
+            pcall(writefile, mp3File, audioData)
+        end
+        if isfile and isfile(mp3File) then
+            savedMp3 = mp3File
         end
     end
 
@@ -231,34 +281,45 @@ local function writeSoundCache(id)
     -- but spawnSound will fall back to rbxassetid:// instead.
     local ok, encoded = pcall(HttpService.JSONEncode, HttpService, {
         SoundID = id,
-        Sound   = mp3Filename,
+        Sound   = savedMp3,
     })
     if ok and encoded then
-        pcall(writefile, getCacheFilename(id), encoded)
+        pcall(writefile, jsonFile, encoded)
     end
 
-    if mp3Filename then
-        print("[Sound6D] Cached sound", id, "→", mp3Filename)
+    -- Register in the index so readSoundCache can find the file by ID.
+    writeIndex(id, soundName)
+
+    if savedMp3 then
+        print("[Sound6D] Cached →", savedMp3, "|", jsonFile)
     else
-        warn("[Sound6D] Audio download failed for", id, "— JSON-only cache written")
+        warn("[Sound6D] Audio download failed for", id, "— JSON-only cache written as", jsonFile)
     end
 end
 
--- Returns false        → no valid cache entry
--- Returns true         → valid, but no local MP3 (fall back to rbxassetid://)
--- Returns <string>     → valid + local MP3 path ready for getcustomasset()
+-- ── Read ──────────────────────────────────────────────────────────
+--  Returns false        → no valid cache entry
+--  Returns true         → valid, but no local MP3 (fall back to rbxassetid://)
+--  Returns <string>     → valid + local MP3 path, pass to getsynasset/getcustomasset
 local function readSoundCache(id)
     if not readfile or not isfile then return false end
-    local filename = getCacheFilename(id)
-    if not isfile(filename) then return false end
-    local ok, raw = pcall(readfile, filename)
+
+    -- Look up the sound's name from the index.
+    local index = readIndex()
+    local soundName = index[tostring(id)]
+    if not soundName then return false end
+
+    local jsonFile = soundName .. ".json"
+    if not isfile(jsonFile) then return false end
+
+    local ok, raw = pcall(readfile, jsonFile)
     if not ok or not raw or raw == "" then return false end
     local ok2, data = pcall(HttpService.JSONDecode, HttpService, raw)
     if not ok2 or not data then return false end
     if tostring(data.SoundID) ~= tostring(id) then return false end
 
     -- If the MP3 file is on disk, return its path so spawnSound can
-    -- hand it straight to getcustomasset() and skip Roblox entirely.
+    -- resolve it via getsynasset/getcustomasset and skip Roblox entirely.
     if data.Sound and type(data.Sound) == "string"
         and isfile and isfile(data.Sound)
     then
@@ -516,9 +577,10 @@ getgenv().Sound6D = function(idOrInstance, volume, looped)
             if cachedResult then
                 SoundCache[id] = true
 
-                if type(cachedResult) == "string" and getcustomasset then
+                local g = getsynasset or getcustomasset
+                if type(cachedResult) == "string" and g then
                     -- Load directly from the local MP3 — Roblox never contacted.
-                    local localUrl = getcustomasset(cachedResult)
+                    local localUrl = g(cachedResult)
                     print("[Sound6D] Playing from local cache:", cachedResult)
                     spawnSound(id, volume, looped, localUrl)
                 else
@@ -540,8 +602,9 @@ getgenv().Sound6D = function(idOrInstance, volume, looped)
             -- After the first successful load the MP3 is now on disk.
             -- Re-read the cache to get the local path for this session too.
             local freshCache = readSoundCache(id)
-            if type(freshCache) == "string" and getcustomasset then
-                local localUrl = getcustomasset(freshCache)
+            local g = getsynasset or getcustomasset
+            if type(freshCache) == "string" and g then
+                local localUrl = g(freshCache)
                 spawnSound(id, volume, looped, localUrl)
             else
                 spawnSound(id, volume, looped)
