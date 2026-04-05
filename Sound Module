@@ -242,39 +242,103 @@ local function writeSoundCache(id)
     local oggFile   = soundName .. ".ogg"   -- Roblox CDN always delivers OGG
     local jsonFile  = soundName .. ".json"
 
-    -- Download the raw audio binary from the CDN.
-    -- Roblox re-encodes all uploaded audio to OGG Vorbis internally,
-    -- so the delivery endpoint always returns OGG regardless of what
-    -- was originally uploaded. We save with .ogg so the executor's
-    -- audio decoder sees the correct format and doesn't reject it.
-    local audioData = nil
-    local cdnEndpoints = {
-        "https://assetdelivery.roblox.com/v1/asset?id="  .. id,
-        "https://assetdelivery.roblox.com/v1/assetId/"   .. id,
-        "https://assetdelivery.roblox.com/v2/assetId/"   .. id,
-    }
+    -- ── Fetch the real audio binary from the CDN ──────────────────────
+    --
+    --  The v1 endpoint does NOT return audio directly — it issues a 302
+    --  redirect whose Location header points to the real CloudFront URL.
+    --  If the executor doesn't auto-follow that redirect we end up saving
+    --  redirect HTML, which FMOD rejects as "unsupported file format".
+    --
+    --  Correct two-step approach:
+    --    1. Hit v2/assetId/<id> → JSON with "location" = real CDN URL
+    --    2. GET that location URL → actual OGG bytes
+    --
+    --  Fallback: if v2 fails, try v1 and manually follow the Location
+    --  header from the response (works when the executor exposes headers).
+    --  Last resort: try game:HttpGet which auto-follows redirects.
+    -- ─────────────────────────────────────────────────────────────────
+    local placeId = tostring(game.PlaceId)
 
-    for _, url in ipairs(cdnEndpoints) do
+    local function fetchDirectUrl(directUrl)
         local res = execRequest({
-            Url     = url,
+            Url     = directUrl,
             Method  = "GET",
             Headers = { ["User-Agent"] = "Roblox/WinInet" },
         })
         if res and res.StatusCode == 200 and res.Body and #res.Body > 128 then
-            audioData = res.Body
-            break
+            -- Sanity-check: real OGG starts with "OggS", real audio is binary.
+            -- Reject anything that looks like an HTML redirect page.
+            if not res.Body:sub(1, 10):find("<!") then
+                return res.Body
+            end
+        end
+        return nil
+    end
+
+    local audioData = nil
+
+    -- Step 1: v2 → JSON location
+    local v2res = execRequest({
+        Url     = "https://assetdelivery.roblox.com/v2/assetId/" .. id
+                  .. "?serverplaceid=" .. placeId,
+        Method  = "GET",
+        Headers = { ["User-Agent"] = "Roblox/WinInet" },
+    })
+    if v2res and v2res.StatusCode == 200 and v2res.Body then
+        local loc = v2res.Body:match('"location"%s*:%s*"([^"]+)"')
+        if loc then
+            -- JSON-unescape forward slashes (\/ → /)
+            loc = loc:gsub("\\/", "/")
+            audioData = fetchDirectUrl(loc)
+        end
+    end
+
+    -- Step 2: v1 + manual redirect follow via Location header
+    if not audioData then
+        local v1res = execRequest({
+            Url     = "https://assetdelivery.roblox.com/v1/asset?id=" .. id
+                      .. "&serverplaceid=" .. placeId,
+            Method  = "GET",
+            Headers = { ["User-Agent"] = "Roblox/WinInet" },
+        })
+        if v1res then
+            -- If executor followed the redirect we may already have audio
+            if v1res.StatusCode == 200 and v1res.Body and #v1res.Body > 128
+                and not v1res.Body:sub(1, 10):find("<!") then
+                audioData = v1res.Body
+            -- Otherwise follow the Location header manually
+            elseif v1res.Headers then
+                local loc = v1res.Headers["Location"] or v1res.Headers["location"]
+                if loc then audioData = fetchDirectUrl(loc) end
+            end
+        end
+    end
+
+    -- Step 3: game:HttpGet auto-follows redirects natively
+    if not audioData then
+        local ok, body = pcall(function()
+            return game:HttpGet(
+                "https://assetdelivery.roblox.com/v1/asset?id=" .. id
+                .. "&serverplaceid=" .. placeId
+            )
+        end)
+        if ok and body and #body > 128 and not body:sub(1, 10):find("<!") then
+            audioData = body
         end
     end
 
     -- Write the OGG to disk and verify it actually landed.
+    -- Double-check the magic bytes: every OGG file starts with "OggS".
     local savedOgg = nil
-    if audioData then
+    if audioData and audioData:sub(1, 4) == "OggS" then
         if not isfile(oggFile) then
             pcall(writefile, oggFile, audioData)
         end
         if isfile and isfile(oggFile) then
             savedOgg = oggFile
         end
+    elseif audioData then
+        warn("[Sound6D] Downloaded data for", id, "doesn't look like OGG (got", #audioData, "bytes, header:", audioData:sub(1,4):byte(1), audioData:sub(1,4):byte(2), audioData:sub(1,4):byte(3), audioData:sub(1,4):byte(4), ") — not saving")
     end
 
     -- Write the JSON record.
