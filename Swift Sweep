@@ -253,7 +253,7 @@ v12 = function(v1090)
         end);
 
         -- ── HIT (cresc + mesh + particle) fires 0.15s after miss ──
-        task.delay(0.15, function()
+        task.delay(0.30, function()
             local v4270 = v4268.FollowUpCresc:Clone();
             local v4271 = v4268.SweepHitMesh:Clone();
             v4271.CFrame = l_Character_14.HumanoidRootPart.CFrame * CFrame.new(2.16400146484375, -2.9619998931884766, -4.4180297851562) * CFrame.Angles(0, 0, -1.5707963267948966);
@@ -293,7 +293,7 @@ humanoid.WalkSpeed = 0;
 getgenv().Animator6D(16944265635, 1, false);
 
 -- Play hit animation at 0.15s alongside the first (does not stop it)
-task.delay(0.15, function()
+task.delay(0.30, function()
     getgenv().Animator6D(16944345619, 1, false);
 end);
 
