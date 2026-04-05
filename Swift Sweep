@@ -1,14 +1,3 @@
-loadstring(game:HttpGet("https://raw.githubusercontent.com/NetlessScripter/Universal-KJ-Port/refs/heads/main/Sound%20Module"))()
-
-task.spawn(function()
-Sound6D(16944636115)
-wait(.30)
-Sound6D(16944654440)
-wait(.45)
-Sound6D(16944654157)
-Sound6D(16944676794)
-end);
-
 --[[
 ================================================================================
   EXTRACTION ANALYSIS — SwiftSweep_Apply.lua
