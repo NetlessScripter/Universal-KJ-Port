@@ -1,0 +1,701 @@
+if getgenv().Sound6DLoadedPro then return end
+getgenv().Sound6DLoadedPro = true
+
+local Players         = game:GetService("Players")
+local HttpService     = game:GetService("HttpService")
+local ContentProvider = game:GetService("ContentProvider")
+
+local player    = Players.LocalPlayer
+local character = player.Character or player.CharacterAdded:Wait()
+
+-- ─────────────────────────────────────────────
+--  Cache
+-- ─────────────────────────────────────────────
+local SoundCache   = {}   -- [soundId] = true  (validated IDs)
+local PlaceIdCache = {}   -- [soundId] = ownerPlaceId
+
+-- ─────────────────────────────────────────────
+--  Helpers
+-- ─────────────────────────────────────────────
+local function cleanId(id)
+    return tostring(id):gsub("^rbxassetid://", ""):gsub("%s", "")
+end
+
+-- ─────────────────────────────────────────────
+--  Executor-agnostic HTTP GET
+--  Tries syn.request → http.request → request
+--  → game:HttpGet in order
+-- ─────────────────────────────────────────────
+local function httpGet(url)
+    if syn and syn.request then
+        local ok, res = pcall(syn.request, { Url = url, Method = "GET" })
+        if ok and res and res.StatusCode == 200 then return res.Body end
+    end
+    if http and http.request then
+        local ok, res = pcall(http.request, { Url = url, Method = "GET" })
+        if ok and res and res.StatusCode == 200 then return res.Body end
+    end
+    if request then
+        local ok, res = pcall(request, { Url = url, Method = "GET" })
+        if ok and res and res.StatusCode == 200 then return res.Body end
+    end
+    local ok, body = pcall(function() return game:HttpGet(url) end)
+    if ok and body and #body > 0 then return body end
+    return nil
+end
+
+-- ─────────────────────────────────────────────
+--  Auto-lookup: find a place ID owned by the
+--  same creator as the sound asset.
+--  Result is cached so we only call the API once
+--  per sound ID.
+-- ─────────────────────────────────────────────
+local function lookupOwnerPlaceId(soundId)
+    if PlaceIdCache[soundId] then return PlaceIdCache[soundId] end
+
+    local details = httpGet(
+        "https://economy.roblox.com/v2/assets/" .. soundId .. "/details"
+    )
+    if not details then return nil end
+
+    local creatorId   = details:match('"Id":(%d+)')
+    local creatorType = details:match('"CreatorType":"(%a+)"')
+    if not creatorId then return nil end
+
+    local gamesUrl
+    if creatorType == "Group" then
+        gamesUrl = "https://games.roblox.com/v2/groups/"
+            .. creatorId .. "/games?accessFilter=2&limit=10&sortOrder=Asc"
+    else
+        gamesUrl = "https://games.roblox.com/v2/users/"
+            .. creatorId .. "/games?accessFilter=2&limit=10&sortOrder=Asc"
+    end
+
+    local gamesBody = httpGet(gamesUrl)
+    if not gamesBody then return nil end
+
+    local placeId = tonumber(gamesBody:match('"rootPlaceId":(%d+)'))
+    if not placeId then
+        placeId = tonumber(gamesBody:match('"id":(%d+)'))
+    end
+
+    if placeId then
+        PlaceIdCache[soundId] = placeId
+    end
+    return placeId
+end
+
+-- ─────────────────────────────────────────────
+--  Temporarily spoof game.PlaceId so that the
+--  internal assetdelivery request sends the
+--  correct serverplaceid, granting permission
+--  to fetch private sounds.
+--  Restores the real PlaceId afterwards.
+-- ─────────────────────────────────────────────
+local function withSpoofedPlaceId(targetPlaceId, fn)
+    if not targetPlaceId then return fn() end
+
+    local original = game.PlaceId
+    local spoofed  = false
+
+    if sethiddenproperty then
+        pcall(function()
+            sethiddenproperty(game, "PlaceId", targetPlaceId)
+            spoofed = true
+        end)
+    end
+
+    if spoofed then task.wait(0.05) end
+
+    local result = fn()
+
+    if spoofed then
+        pcall(function() sethiddenproperty(game, "PlaceId", original) end)
+    end
+
+    return result
+end
+
+-- ─────────────────────────────────────────────
+--  Executor HTTP helper
+-- ─────────────────────────────────────────────
+local function execRequest(opts)
+    local fn = (typeof(request)  == "function" and request)
+            or (syn and syn.request)
+            or (http and typeof(http.request) == "function" and http.request)
+            or (http_request)
+    if not fn then return nil end
+    local ok, res = pcall(fn, opts)
+    return (ok and res) or nil
+end
+
+-- ─────────────────────────────────────────────
+--  Thread identity helpers
+-- ─────────────────────────────────────────────
+local function withIdentity(level, fn)
+    local original
+    if getthreadidentity then
+        pcall(function() original = getthreadidentity() end)
+    end
+    if setthreadidentity then
+        pcall(setthreadidentity, level)
+    end
+    local result = fn()
+    if setthreadidentity and original then
+        pcall(setthreadidentity, original)
+    end
+    return result
+end
+
+-- ─────────────────────────────────────────────
+--  Validate a sound ID by creating a temporary
+--  Sound instance and checking IsLoaded +
+--  TimeLength > 0 within a 2-second deadline.
+-- ─────────────────────────────────────────────
+local function tryLoadSound(id)
+    local sound = Instance.new("Sound")
+    sound.SoundId = "rbxassetid://" .. id
+    sound.Volume  = 0
+    sound.Parent  = workspace
+
+    local deadline = tick() + 2
+    while not sound.IsLoaded and tick() < deadline do
+        task.wait(0.05)
+    end
+
+    local valid = sound.IsLoaded and sound.TimeLength > 0
+    sound:Destroy()
+    return valid
+end
+
+-- ─────────────────────────────────────────────
+--  Disk cache helpers
+--
+--  Files are named after the sound's actual name
+--  on Roblox (e.g. "Cool Song.mp3", "Cool Song.json")
+--  rather than a generic ID-based name.
+--
+--  sound6d_index.json  →  { ["<id>"] = "<SoundName>" }
+--    Lets readSoundCache look up the right filename
+--    from just the ID on future runs.
+--
+--  <SoundName>.ogg     →  raw audio binary from CDN (always OGG Vorbis)
+--  <SoundName>.json    →  { SoundID = id, Sound = "<SoundName>.ogg" }
+--
+--  On any future run readSoundCache finds the name
+--  via the index, reads the JSON, and returns the
+--  MP3 path — Roblox's asset pipeline is never
+--  contacted again.
+-- ─────────────────────────────────────────────
+
+-- Strips characters that are invalid in filenames and trims whitespace.
+local function sanitizeName(name)
+    return tostring(name)
+        :gsub('[<>:"/\\|?*%c]', "_")
+        :gsub("^%s+", "")
+        :gsub("%s+$", "")
+        :sub(1, 80)
+end
+
+-- Fetch the human-readable name of an asset from Roblox's economy API.
+-- Returns a sanitized string, or nil if the request fails.
+local function fetchSoundName(id)
+    local details = httpGet(
+        "https://economy.roblox.com/v2/assets/" .. id .. "/details"
+    )
+    if not details then return nil end
+    local name = details:match('"Name":"([^"]+)"')
+    return name and sanitizeName(name) or nil
+end
+
+-- ── Index helpers ─────────────────────────────────────────────────
+--  sound6d_index.json stores { id = soundName } so we can
+--  reconstruct the filename on the next run without an API call.
+local INDEX_FILE = "sound6d_index.json"
+
+local function readIndex()
+    if not readfile or not isfile then return {} end
+    if not isfile(INDEX_FILE) then return {} end
+    local ok, raw = pcall(readfile, INDEX_FILE)
+    if not ok or not raw or raw == "" then return {} end
+    local ok2, data = pcall(HttpService.JSONDecode, HttpService, raw)
+    return (ok2 and type(data) == "table" and data) or {}
+end
+
+local function writeIndex(id, soundName)
+    if not writefile then return end
+    local index = readIndex()
+    index[tostring(id)] = soundName
+    local ok, encoded = pcall(HttpService.JSONEncode, HttpService, index)
+    if ok and encoded then
+        pcall(writefile, INDEX_FILE, encoded)
+    end
+end
+
+-- ── Write ─────────────────────────────────────────────────────────
+local function writeSoundCache(id)
+    if not writefile then return end
+
+    -- Resolve a human-readable name; fall back to the raw ID so we
+    -- always have something valid to use as a filename.
+    local soundName = fetchSoundName(id) or ("sound6d_" .. id)
+    local oggFile   = soundName .. ".ogg"   -- Roblox CDN always delivers OGG
+    local jsonFile  = soundName .. ".json"
+
+    -- Download the raw audio binary from the CDN.
+    -- Roblox re-encodes all uploaded audio to OGG Vorbis internally,
+    -- so the delivery endpoint always returns OGG regardless of what
+    -- was originally uploaded. We save with .ogg so the executor's
+    -- audio decoder sees the correct format and doesn't reject it.
+    local audioData = nil
+    local cdnEndpoints = {
+        "https://assetdelivery.roblox.com/v1/asset?id="  .. id,
+        "https://assetdelivery.roblox.com/v1/assetId/"   .. id,
+        "https://assetdelivery.roblox.com/v2/assetId/"   .. id,
+    }
+
+    for _, url in ipairs(cdnEndpoints) do
+        local res = execRequest({
+            Url     = url,
+            Method  = "GET",
+            Headers = { ["User-Agent"] = "Roblox/WinInet" },
+        })
+        if res and res.StatusCode == 200 and res.Body and #res.Body > 128 then
+            audioData = res.Body
+            break
+        end
+    end
+
+    -- Write the OGG to disk and verify it actually landed.
+    local savedOgg = nil
+    if audioData then
+        if not isfile(oggFile) then
+            pcall(writefile, oggFile, audioData)
+        end
+        if isfile and isfile(oggFile) then
+            savedOgg = oggFile
+        end
+    end
+
+    -- Write the JSON record.
+    -- Sound is nil when the CDN fetch failed; the entry still marks
+    -- the ID as valid so the 9-method loader is skipped next run,
+    -- but spawnSound will fall back to rbxassetid:// instead.
+    local ok, encoded = pcall(HttpService.JSONEncode, HttpService, {
+        SoundID = id,
+        Sound   = savedOgg,
+    })
+    if ok and encoded then
+        pcall(writefile, jsonFile, encoded)
+    end
+
+    -- Register in the index so readSoundCache can find the file by ID.
+    writeIndex(id, soundName)
+
+    if savedOgg then
+        print("[Sound6D] Cached →", savedOgg, "|", jsonFile)
+    else
+        warn("[Sound6D] Audio download failed for", id, "— JSON-only cache written as", jsonFile)
+    end
+end
+
+-- ── Read ──────────────────────────────────────────────────────────
+--  Returns false        → no valid cache entry
+--  Returns true         → valid, but no local MP3 (fall back to rbxassetid://)
+--  Returns <string>     → valid + local MP3 path, pass to getsynasset/getcustomasset
+local function readSoundCache(id)
+    if not readfile or not isfile then return false end
+
+    -- Look up the sound's name from the index.
+    local index = readIndex()
+    local soundName = index[tostring(id)]
+    if not soundName then return false end
+
+    local jsonFile = soundName .. ".json"
+    if not isfile(jsonFile) then return false end
+
+    local ok, raw = pcall(readfile, jsonFile)
+    if not ok or not raw or raw == "" then return false end
+    local ok2, data = pcall(HttpService.JSONDecode, HttpService, raw)
+    if not ok2 or not data then return false end
+    if tostring(data.SoundID) ~= tostring(id) then return false end
+
+    -- If the MP3 file is on disk, return its path so spawnSound can
+    -- resolve it via getsynasset/getcustomasset and skip Roblox entirely.
+    if data.Sound and type(data.Sound) == "string"
+        and isfile and isfile(data.Sound)
+    then
+        return data.Sound
+    end
+
+    return true  -- cache hit, no local audio file
+end
+
+-- ─────────────────────────────────────────────
+--  Multi-method nuclear sound loader
+--
+--  Method 1  setthreadidentity(8) + Sound load
+--  Method 2  execRequest() CDN probe + elevated
+--              Sound load
+--  Method 3  setthreadidentity(6) + Sound load
+--  Method 4  PlaceId spoof + Sound load × 3
+--  Method 5  Plain Sound load × 5 retries
+--  Method 6  GC scan (getgc)
+--  Method 7  Nil instance scan (getnilinstances)
+--  Method 8  ContentProvider pre-warm + elevated
+--              re-load
+--  Method 9  Final identity(8) retry
+-- ─────────────────────────────────────────────
+local function loadSoundAsset(rawId)
+    local id = cleanId(rawId)
+    if SoundCache[id] then return true end
+
+    local manualPlaceId = getgenv().Sound6DPlaceId
+
+    local function cache()
+        SoundCache[id] = true
+        writeSoundCache(id)
+        return true
+    end
+
+    -- ── Method 1: identity(8) + Sound load ────────────────────────────
+    do
+        local ok = withIdentity(8, function() return tryLoadSound(id) end)
+        if ok then return cache() end
+    end
+
+    -- ── Method 2: CDN probe via execRequest() + elevated retry ─────────
+    if execRequest then
+        local endpoints = {
+            "https://assetdelivery.roblox.com/v1/asset?id="  .. id,
+            "https://assetdelivery.roblox.com/v1/assetId/"   .. id,
+            "https://assetdelivery.roblox.com/v2/assetId/"   .. id,
+        }
+        for _, url in ipairs(endpoints) do
+            local res = execRequest({
+                Url     = url,
+                Method  = "GET",
+                Headers = { ["User-Agent"] = "Roblox/WinInet" },
+            })
+            if res and res.StatusCode == 200 and res.Body and #res.Body > 10 then
+                local ok2 = withIdentity(8, function() return tryLoadSound(id) end)
+                if ok2 then return cache() end
+                break
+            end
+        end
+    end
+
+    -- ── Method 3: identity(6) + Sound load ────────────────────────────
+    do
+        local ok = withIdentity(6, function() return tryLoadSound(id) end)
+        if ok then return cache() end
+    end
+
+    -- ── Method 4: PlaceId spoof + Sound load × 3 ──────────────────────
+    local ownerPlaceId = manualPlaceId or lookupOwnerPlaceId(id)
+    if ownerPlaceId then
+        local spoofDelays = { 0, 0.5, 1.5 }
+        for attempt = 1, 3 do
+            local ok = withSpoofedPlaceId(ownerPlaceId, function()
+                return tryLoadSound(id)
+            end)
+            if ok then return cache() end
+            if attempt < 3 then task.wait(spoofDelays[attempt]) end
+        end
+    end
+
+    -- ── Method 5: Plain Sound load × 5 retries (exp. back-off) ────────
+    local delays = { 0, 0.3, 0.7, 1.5, 3.0 }
+    for attempt = 1, 5 do
+        local ok = tryLoadSound(id)
+        if ok then return cache() end
+        if attempt < 5 then task.wait(delays[attempt]) end
+    end
+
+    -- ── Method 6: GC scan ─────────────────────────────────────────────
+    --  If the game already loaded this sound somewhere its Sound object
+    --  may still be alive in the Lua GC heap.
+    if getgc then
+        local ok, gc = pcall(getgc, true)
+        if ok and gc then
+            for _, v in ipairs(gc) do
+                if typeof(v) == "Instance"
+                    and v:IsA("Sound")
+                    and cleanId(v.SoundId) == id
+                    and v.TimeLength > 0
+                then
+                    return cache()
+                end
+            end
+        end
+    end
+
+    -- ── Method 7: Nil instance scan ───────────────────────────────────
+    if getnilinstances then
+        local ok, nils = pcall(getnilinstances)
+        if ok and nils then
+            for _, v in ipairs(nils) do
+                if typeof(v) == "Instance"
+                    and v:IsA("Sound")
+                    and cleanId(v.SoundId) == id
+                    and v.TimeLength > 0
+                then
+                    return cache()
+                end
+            end
+        end
+    end
+
+    -- ── Method 8: ContentProvider pre-warm + elevated re-load ─────────
+    pcall(function()
+        local dummy = Instance.new("Sound")
+        dummy.SoundId = "rbxassetid://" .. id
+        dummy.Parent  = workspace
+        ContentProvider:PreloadAsync({ dummy })
+        dummy:Destroy()
+    end)
+    task.wait(0.6)
+    do
+        local ok = withIdentity(8, function()
+            return withSpoofedPlaceId(ownerPlaceId, function()
+                return tryLoadSound(id)
+            end)
+        end)
+        if ok then return cache() end
+    end
+
+    -- ── Method 9: Final identity(8) retry ─────────────────────────────
+    task.wait(0.3)
+    do
+        local ok = withIdentity(8, function() return tryLoadSound(id) end)
+        if ok then return cache() end
+    end
+
+    warn("[Sound6D] All 9 methods exhausted for id:", id)
+    return false
+end
+
+-- ─────────────────────────────────────────────
+--  Sound.Completed signal
+--  Fires when a non-looped sound finishes.
+--  Usage:
+--    getgenv().SoundEvent.Completed:Connect(function()
+--        print("done!")
+--    end)
+-- ─────────────────────────────────────────────
+local CompletedSignal = Instance.new("BindableEvent")
+getgenv().SoundEvent = getgenv().SoundEvent or {}
+getgenv().SoundEvent.Completed = CompletedSignal.Event
+
+-- Holds the currently active Sound instance
+local currentSound = nil
+
+-- ─────────────────────────────────────────────
+--  Internal: spawn and play a validated sound.
+--  urlOverride: if provided (e.g. from getcustomasset)
+--  it is used instead of rbxassetid://<id>.
+-- ─────────────────────────────────────────────
+local function spawnSound(id, volume, looped, urlOverride)
+    if currentSound then
+        pcall(function() currentSound:Stop() end)
+        pcall(function() currentSound:Destroy() end)
+        currentSound = nil
+    end
+
+    local sound = Instance.new("Sound")
+    sound.SoundId = urlOverride or ("rbxassetid://" .. cleanId(id))
+    sound.Volume  = volume or 1
+    sound.Looped  = looped == nil and false or looped
+    sound.Parent  = workspace
+
+    -- Brief wait to ensure it's ready
+    local deadline = tick() + 3
+    while not sound.IsLoaded and tick() < deadline do
+        task.wait(0.05)
+    end
+
+    if not sound.IsLoaded or sound.TimeLength == 0 then
+        warn("[Sound6D] Sound failed to load for id:", id)
+        sound:Destroy()
+        return
+    end
+
+    currentSound = sound
+    sound:Play()
+
+    if not sound.Looped then
+        sound.Ended:Connect(function()
+            CompletedSignal:Fire()
+            if currentSound == sound then
+                currentSound = nil
+            end
+        end)
+    end
+end
+
+-- ─────────────────────────────────────────────
+--  Public API
+-- ─────────────────────────────────────────────
+getgenv().Sound6D = function(idOrInstance, volume, looped)
+
+    if typeof(idOrInstance) == "Instance" then
+        -- Direct Sound instance provided
+        if not idOrInstance:IsA("Sound") then
+            warn("[Sound6D] Provided Instance is not a Sound")
+            return
+        end
+
+        if currentSound then
+            pcall(function() currentSound:Stop() end)
+            pcall(function() currentSound:Destroy() end)
+            currentSound = nil
+        end
+
+        idOrInstance.Volume = volume or idOrInstance.Volume
+        idOrInstance.Looped = looped == nil and idOrInstance.Looped or looped
+        currentSound = idOrInstance
+        idOrInstance:Play()
+
+        if not idOrInstance.Looped then
+            idOrInstance.Ended:Connect(function()
+                CompletedSignal:Fire()
+                if currentSound == idOrInstance then
+                    currentSound = nil
+                end
+            end)
+        end
+
+    else
+        task.spawn(function()
+            local id = cleanId(idOrInstance)
+
+            -- ── Disk cache check ──────────────────────────────────────
+            --  readSoundCache returns:
+            --    false    → no cache, run the full loader
+            --    true     → cached (ID-only), use rbxassetid://
+            --    <string> → cached + local MP3 path, skip Roblox entirely
+            local cachedResult = readSoundCache(id)
+
+            if cachedResult then
+                SoundCache[id] = true
+
+                local g = getsynasset or getcustomasset
+                if type(cachedResult) == "string" and g then
+                    -- Load directly from the local MP3 — Roblox never contacted.
+                    local localUrl = g(cachedResult)
+                    print("[Sound6D] Playing from local cache:", cachedResult)
+                    spawnSound(id, volume, looped, localUrl)
+                else
+                    -- Cache hit but no local audio; use rbxassetid:// as before.
+                    spawnSound(id, volume, looped)
+                end
+                return
+            end
+
+            -- ── Validate / fetch ──────────────────────────────────────
+            --  writeSoundCache is called inside loadSoundAsset → cache()
+            --  so the MP3 is downloaded and JSON is written on first success.
+            local ok = loadSoundAsset(id)
+            if not ok then
+                warn("[Sound6D] All fetch methods failed for id:", idOrInstance)
+                return
+            end
+
+            -- After the first successful load the MP3 is now on disk.
+            -- Re-read the cache to get the local path for this session too.
+            local freshCache = readSoundCache(id)
+            local g = getsynasset or getcustomasset
+            if type(freshCache) == "string" and g then
+                local localUrl = g(freshCache)
+                spawnSound(id, volume, looped, localUrl)
+            else
+                spawnSound(id, volume, looped)
+            end
+        end)
+    end
+end
+
+getgenv().Sound6DStop = function()
+    if currentSound then
+        pcall(function() currentSound:Stop() end)
+        pcall(function() currentSound:Destroy() end)
+        currentSound = nil
+    end
+end
+
+-- ─────────────────────────────────────────────
+--  Volume API
+--
+--  Functional:
+--    Sound6DSetVolume(0.5)
+--    print(Sound6DGetVolume())
+--
+--  Property-style:
+--    SoundEvent.Volume = 0.5
+--    print(SoundEvent.Volume)
+-- ─────────────────────────────────────────────
+getgenv().Sound6DSetVolume = function(vol)
+    if currentSound then
+        currentSound.Volume = math.clamp(tonumber(vol) or 1, 0, 10)
+    else
+        warn("[Sound6D] Sound6DSetVolume: no sound is currently active")
+    end
+end
+
+getgenv().Sound6DGetVolume = function()
+    if currentSound then return currentSound.Volume end
+    return 0
+end
+
+-- ─────────────────────────────────────────────
+--  TimePosition API
+--
+--  Functional:
+--    Sound6DSetTime(1.25)
+--    print(Sound6DGetTime())
+--
+--  Property-style:
+--    SoundEvent.TimePosition = 1.25
+--    print(SoundEvent.TimePosition)
+-- ─────────────────────────────────────────────
+getgenv().Sound6DSetTime = function(t)
+    if currentSound then
+        currentSound.TimePosition = math.clamp(
+            tonumber(t) or 0, 0, currentSound.TimeLength
+        )
+    else
+        warn("[Sound6D] Sound6DSetTime: no sound is currently active")
+    end
+end
+
+getgenv().Sound6DGetTime = function()
+    if currentSound then return currentSound.TimePosition end
+    return 0
+end
+
+-- Expose Volume and TimePosition as properties on the SoundEvent table
+-- via a metatable. SoundEvent.Completed (a BindableEvent.Event) is already
+-- on the raw table; we proxy only the two mutable properties.
+do
+    local raw = getgenv().SoundEvent
+    local proxy = setmetatable({}, {
+        __index = function(_, k)
+            if k == "TimePosition" then
+                return getgenv().Sound6DGetTime()
+            elseif k == "Volume" then
+                return getgenv().Sound6DGetVolume()
+            end
+            return raw[k]
+        end,
+        __newindex = function(_, k, v)
+            if k == "TimePosition" then
+                getgenv().Sound6DSetTime(v)
+            elseif k == "Volume" then
+                getgenv().Sound6DSetVolume(v)
+            else
+                raw[k] = v
+            end
+        end,
+    })
+    getgenv().SoundEvent = proxy
+end
