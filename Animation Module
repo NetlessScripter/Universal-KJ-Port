@@ -906,7 +906,12 @@ getgenv().Animator6D = function(idOrInstance, speed, looped)
 
         suppressDefaultAnims(character)
         if getgenv().currentAnimator6D then
-            pcall(function() getgenv().currentAnimator6D:Stop(true) end)
+            -- Stop(false): don't blend-out to rest here.  The new animation's
+            -- blend-in will crossfade from the current motor pose.  Stop(true)
+            -- would spawn a blend-out thread that fights the incoming blend-in,
+            -- causing the motors to get written by two coroutines simultaneously
+            -- and producing a completely distorted/collapsed character pose.
+            pcall(function() getgenv().currentAnimator6D:Stop(false) end)
             getgenv().currentAnimator6D = nil
         end
 
@@ -938,7 +943,7 @@ getgenv().Animator6D = function(idOrInstance, speed, looped)
             if cachedFrames then
                 suppressDefaultAnims(character)
                 if getgenv().currentAnimator6D then
-                    pcall(function() getgenv().currentAnimator6D:Stop(true) end)
+                    pcall(function() getgenv().currentAnimator6D:Stop(false) end)
                     getgenv().currentAnimator6D = nil
                 end
 
@@ -967,7 +972,7 @@ getgenv().Animator6D = function(idOrInstance, speed, looped)
 
             suppressDefaultAnims(character)
             if getgenv().currentAnimator6D then
-                pcall(function() getgenv().currentAnimator6D:Stop(true) end)
+                pcall(function() getgenv().currentAnimator6D:Stop(false) end)
                 getgenv().currentAnimator6D = nil
             end
 
