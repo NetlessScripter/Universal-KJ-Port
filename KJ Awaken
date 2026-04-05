@@ -1,0 +1,270 @@
+--[[
+================================================================================
+  EXTRACTION — KJ_Awaken_Extracted.lua
+================================================================================
+
+  SOURCE
+  ------
+  Stripped from tsb_interpreter.txt (deobfuscated TSB LocalScript, ~149,235 lines).
+
+  EFFECTS EXTRACTED
+  -----------------
+    "KJ Awaken"    — interpreter lines 20487–20597
+
+  ANIMATION CHECK — REMOVED
+  -------------------------
+  Animation track gate stripped. VFX fires unconditionally.
+  Marker signals replaced with task.delay estimates:
+    ParticleActivate  instant
+    TweenStuff        ~2.0s
+    AwakenFinale      ~8.3s
+
+  DEPENDENCIES INCLUDED
+  ----------------------
+    v10        TweenService
+    l_Debris_0 Debris service
+    v_u_1      RunService         (UnixConnection2 core loop)
+    v1058      asset loader / maid helper
+    v16        inlined Util functions:
+                 EmitParticlesAlt, EnabledAllVisuals, DisableAllVisuals,
+                 Lerp, UnixConnection2, AddTempFunction
+
+  STRIPPED
+  --------
+    v9, v313, shared.sfx  (sounds removed per request)
+    v102, v717, v31, QuickWeld  (not used by KJ Awaken)
+    All other effect blocks
+    All animation gating
+
+================================================================================
+]]
+
+-- ============================================================
+-- GLOBALS
+-- ============================================================
+local v10        = game:GetService("TweenService")
+local l_Debris_0 = game:GetService("Debris")
+local v_u_1      = game:GetService("RunService")
+
+-- ============================================================
+-- INLINED UTIL (only what KJ Awaken uses)
+-- ============================================================
+local v_u_5 = {}
+
+local function Lerp(p45, p46, p47)
+    return p45 + (p46 - p45) * p47
+end
+
+local v16 = {}
+
+function v16:EmitParticlesAlt(p7)
+    for _, v8 in pairs(p7:GetDescendants()) do
+        if v8:IsA("ParticleEmitter") then
+            v8:Emit(v8:GetAttribute("EmitCount"), v8:GetAttribute("EmitDelay"))
+        end
+    end
+end
+
+function v16:EnabledAllVisuals(p32)
+    for _, v33 in pairs(p32:GetDescendants()) do
+        if v33:IsA("ParticleEmitter") or v33:IsA("Beam") or v33:IsA("Trail") or v33:IsA("PointLight") then
+            v33.Enabled = true
+        end
+    end
+end
+
+function v16:DisableAllVisuals(p30)
+    for _, v31 in ipairs(p30:GetDescendants()) do
+        if v31:IsA("ParticleEmitter") or v31:IsA("Beam") or v31:IsA("Trail") or v31:IsA("PointLight") then
+            v31.Enabled = false
+        end
+    end
+end
+
+function v16:Lerp(p48, p49, p50)
+    return p48 + (p49 - p48) * p50
+end
+
+function v16:AddTempFunction(p12)
+    table.insert(v_u_5, { callback = p12 })
+end
+
+function v16:UnixConnection2(p_u_55, p_u_56, p_u_57, p_u_58)
+    local v_u_59 = false
+    local v_u_60 = false
+    local v_u_61 = tick()
+    self:AddTempFunction(function(p62)
+        v_u_59 = v_u_61 + p_u_55 <= tick()
+        if p_u_56 and (p_u_57 and p_u_57() or p_u_57 == nil) and not v_u_59 then
+            local v63 = (tick() - v_u_61) / p_u_55
+            p_u_56(v63, p62, Lerp(1, 0, v63), tick() - v_u_61)
+        elseif not v_u_60 then
+            v_u_60 = true
+            if p_u_56 and v_u_59 then
+                p_u_56(1, p62, 0, p_u_55)
+            end
+            if p_u_58 then
+                p_u_58(1, p62, 0)
+            end
+            return true
+        end
+    end)
+end
+
+-- Core loop for UnixConnection2
+v_u_1.RenderStepped:Connect(function(p85)
+    for _, v87 in pairs(v_u_5) do
+        if v87.callback(p85) then
+            table.remove(v_u_5, table.find(v_u_5, v87))
+        end
+    end
+end)
+
+-- ============================================================
+-- v1058: asset loader / maid helper
+-- ============================================================
+local function v1058(v1035, v1036, v1037)
+    local v1038 = {}
+    for _, v1040 in pairs(v1035:GetChildren()) do
+        v1038[v1040.Name] = v1040
+    end
+    local v1048 = setmetatable({}, {
+        __index = function(_, v1042)
+            return {
+                Clone = function(_)
+                    local v1044 = rawget(v1038, v1042):Clone()
+                    if not table.find(v1036, v1044) then
+                        table.insert(v1036, v1044)
+                    end
+                    return v1044
+                end,
+                GetChildren = function(_)
+                    return rawget(v1038, v1042):GetChildren()
+                end,
+                GetAttribute = function(_, v1047)
+                    return rawget(v1038, v1042):GetAttribute(v1047)
+                end
+            }
+        end
+    })
+    local v1049 = { _maid = {} }
+    local function v1052()
+        if v1048 and v1049 then
+            table.clear(v1048)
+            table.clear(v1049)
+        end
+        if v1038 then
+            table.clear(v1038)
+            v1038 = nil
+        end
+        v1049 = nil
+        v1048 = nil
+        if v1036 then
+            for v1055, v1056 in pairs(v1036) do
+                if typeof(v1056) == "RBXScriptConnection" then
+                    v1056:Disconnect()
+                elseif typeof(v1056) == "Instance" then
+                    v1056:Destroy()
+                end
+                v1036[v1055] = nil
+            end
+            table.clear(v1036)
+        end
+        v1036 = nil
+    end
+    local v1057 = 10
+    if v1037 ~= nil and typeof(v1037) == "number" then
+        v1057 = v1037
+    end
+    task.delay(v1057, v1052)
+    return v1048, v1049, v1052
+end
+
+-- ============================================================
+-- v12: EFFECT DISPATCHER
+-- ============================================================
+local v12
+v12 = function(v1090)
+    local v1091 = rawget(v1090, "Effect")
+
+    if v1091 == "KJ Awaken" then
+        local l_Char_4 = v1090.Char
+        local v4102 = v1058(game.ReplicatedStorage.Resources.KJEffects, {}, 15)
+
+        -- Main VFX body — animation gate stripped, markers → task.delay
+        local v4111 = v4102["fine...1"]:Clone()
+        game.Debris:AddItem(v4111, 10)
+        v4111.CFrame = l_Char_4:GetPivot()
+        v4111.Anchored = false
+        for _, v4113 in pairs(v4111:GetDescendants()) do
+            if v4113:IsA("ParticleEmitter") then
+                v4113.Enabled = false
+            end
+        end
+        v4111.Parent = workspace.Thrown
+
+        local l_Weld_5 = Instance.new("Weld")
+        l_Weld_5.Part0 = l_Char_4.HumanoidRootPart
+        l_Weld_5.Part1 = v4111
+        l_Weld_5.Parent = v4111
+
+        local l_v4111_0 = v4111
+
+        -- TweenTheReds: lerps each ParticleEmitter transparency
+        local function v4125(v4118, v4119)
+            for _, v4121 in pairs(l_v4111_0:GetChildren()) do
+                if v4121:IsA("ParticleEmitter") then
+                    local l_Value_2 = v4121.Transparency.Keypoints[1].Value
+                    v16:UnixConnection2(v4118, function(v4123)
+                        local v4124 = v16:Lerp(l_Value_2, v4119, v4123)
+                        v4121.Transparency = NumberSequence.new(v4124)
+                    end)
+                end
+            end
+        end
+
+        -- ParticleActivate — fires instantly
+        local v4133 = v4102["fine...Emit"]:Clone()
+        v4133.CFrame = l_Char_4:GetPivot()
+        v4133.Parent = workspace.Thrown
+        v16:EmitParticlesAlt(v4133)
+        l_Debris_0:AddItem(v4133, 3)
+        v16:EnabledAllVisuals(l_v4111_0)
+        v4125(0.1, 0.94)
+
+        -- TweenStuff marker (~2.0s)
+        task.delay(2.0, function()
+            v4125(0.334, 0.91)
+        end)
+
+        -- AwakenFinale marker (~8.3s)
+        task.delay(8.3, function()
+            local v4135 = v4102["fine...Emit2"]:Clone()
+            v4135.CFrame = l_Char_4:GetPivot()
+            v4135.Parent = workspace.Thrown
+            v16:EmitParticlesAlt(v4135)
+            l_Debris_0:AddItem(v4135, 3)
+            v16:DisableAllVisuals(l_v4111_0)
+        end)
+    end
+end
+
+shared.repfire = v12
+
+-- ============================================================
+-- ENTRY POINT
+-- ============================================================
+local l_LocalPlayer_0 = game.Players.LocalPlayer
+local l_Character_0   = l_LocalPlayer_0.Character or l_LocalPlayer_0.CharacterAdded:Wait()
+local l_Humanoid_0    = l_Character_0:WaitForChild("Humanoid")
+
+if not getgenv().Animator6DLoadedPro then
+    loadstring(game:HttpGet("https://raw.githubusercontent.com/NetlessScripter/Universal-KJ-Port/refs/heads/main/Animation%20Module"))()
+end
+
+getgenv().Animator6D(17140902079, 1, false)
+
+v12({
+    Effect = "KJ Awaken",
+    Char   = l_Character_0,
+})
