@@ -92,8 +92,14 @@ end
 --  to fetch private sounds.
 --  Restores the real PlaceId afterwards.
 -- ─────────────────────────────────────────────
+-- Mutex so concurrent sound loads don't race when spoofing PlaceId
+local spoofMutex = false
 local function withSpoofedPlaceId(targetPlaceId, fn)
     if not targetPlaceId then return fn() end
+
+    -- Wait for any other concurrent spoof to finish
+    while spoofMutex do task.wait(0.05) end
+    spoofMutex = true
 
     local original = game.PlaceId
     local spoofed  = false
@@ -113,6 +119,7 @@ local function withSpoofedPlaceId(targetPlaceId, fn)
         pcall(function() sethiddenproperty(game, "PlaceId", original) end)
     end
 
+    spoofMutex = false
     return result
 end
 
@@ -156,7 +163,8 @@ local function tryLoadSound(id)
     local sound = Instance.new("Sound")
     sound.SoundId = "rbxassetid://" .. id
     sound.Volume  = 0
-    sound.Parent  = workspace
+    -- Parent to CurrentCamera — hidden from most game workspace scanners
+    sound.Parent  = workspace.CurrentCamera
 
     local deadline = tick() + 2
     while not sound.IsLoaded and tick() < deadline do
@@ -581,7 +589,19 @@ local function spawnSound(id, volume, looped, urlOverride)
     sound.SoundId = urlOverride or ("rbxassetid://" .. cleanId(id))
     sound.Volume  = volume or 1
     sound.Looped  = looped == nil and false or looped
-    sound.Parent  = workspace
+
+    -- Parent to CurrentCamera so game workspace-scanner scripts
+    -- cannot see or destroy this sound instance.
+    sound.Parent  = workspace.CurrentCamera
+
+    -- Some executors expose protection APIs — use them if available
+    -- so the game can't Destroy() or Stop() this instance.
+    pcall(function()
+        if makesafe then makesafe(sound) end
+    end)
+    pcall(function()
+        if protect_gui then protect_gui(sound) end
+    end)
 
     local deadline = tick() + 3
     while not sound.IsLoaded and tick() < deadline do
@@ -601,7 +621,7 @@ local function spawnSound(id, volume, looped, urlOverride)
     if not sound.Looped then
         sound.Ended:Connect(function()
             CompletedSignal:Fire()
-            -- Remove from active list once finished
+            -- Remove from active list once finished naturally
             for i, s in ipairs(activeSounds) do
                 if s == sound then
                     table.remove(activeSounds, i)
