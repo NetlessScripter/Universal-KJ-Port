@@ -179,8 +179,8 @@ end
 --    Lets readSoundCache look up the right filename
 --    from just the ID on future runs.
 --
---  <SoundName>.mp3     →  raw audio binary from CDN
---  <SoundName>.json    →  { SoundID = id, Sound = "<SoundName>.mp3" }
+--  <SoundName>.ogg     →  raw audio binary from CDN (always OGG Vorbis)
+--  <SoundName>.json    →  { SoundID = id, Sound = "<SoundName>.ogg" }
 --
 --  On any future run readSoundCache finds the name
 --  via the index, reads the JSON, and returns the
@@ -239,12 +239,14 @@ local function writeSoundCache(id)
     -- Resolve a human-readable name; fall back to the raw ID so we
     -- always have something valid to use as a filename.
     local soundName = fetchSoundName(id) or ("sound6d_" .. id)
-    local mp3File   = soundName .. ".mp3"
+    local oggFile   = soundName .. ".ogg"   -- Roblox CDN always delivers OGG
     local jsonFile  = soundName .. ".json"
 
     -- Download the raw audio binary from the CDN.
-    -- The delivery endpoint returns whatever was originally uploaded
-    -- (OGG or MP3); executors treat the .mp3 extension as a hint only.
+    -- Roblox re-encodes all uploaded audio to OGG Vorbis internally,
+    -- so the delivery endpoint always returns OGG regardless of what
+    -- was originally uploaded. We save with .ogg so the executor's
+    -- audio decoder sees the correct format and doesn't reject it.
     local audioData = nil
     local cdnEndpoints = {
         "https://assetdelivery.roblox.com/v1/asset?id="  .. id,
@@ -264,14 +266,14 @@ local function writeSoundCache(id)
         end
     end
 
-    -- Write the MP3 to disk and verify it actually landed.
-    local savedMp3 = nil
+    -- Write the OGG to disk and verify it actually landed.
+    local savedOgg = nil
     if audioData then
-        if not isfile(mp3File) then
-            pcall(writefile, mp3File, audioData)
+        if not isfile(oggFile) then
+            pcall(writefile, oggFile, audioData)
         end
-        if isfile and isfile(mp3File) then
-            savedMp3 = mp3File
+        if isfile and isfile(oggFile) then
+            savedOgg = oggFile
         end
     end
 
@@ -281,7 +283,7 @@ local function writeSoundCache(id)
     -- but spawnSound will fall back to rbxassetid:// instead.
     local ok, encoded = pcall(HttpService.JSONEncode, HttpService, {
         SoundID = id,
-        Sound   = savedMp3,
+        Sound   = savedOgg,
     })
     if ok and encoded then
         pcall(writefile, jsonFile, encoded)
@@ -290,8 +292,8 @@ local function writeSoundCache(id)
     -- Register in the index so readSoundCache can find the file by ID.
     writeIndex(id, soundName)
 
-    if savedMp3 then
-        print("[Sound6D] Cached →", savedMp3, "|", jsonFile)
+    if savedOgg then
+        print("[Sound6D] Cached →", savedOgg, "|", jsonFile)
     else
         warn("[Sound6D] Audio download failed for", id, "— JSON-only cache written as", jsonFile)
     end
