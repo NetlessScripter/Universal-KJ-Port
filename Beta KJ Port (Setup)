@@ -2,7 +2,6 @@ pcall(function() --[[ Line: 1 ]]
     loadstring(game:HttpGet("https://raw.githubusercontent.com/NetlessScripter/Universal-KJ-Port/refs/heads/main/UI%20And%20Hotbar"))();
     loadstring(game:HttpGet("https://raw.githubusercontent.com/NetlessScripter/Universal-KJ-Port/refs/heads/main/Lighting"))();
     loadstring(game:HttpGet("https://raw.githubusercontent.com/NetlessScripter/Universal-KJ-Port/refs/heads/main/Asset%20Loader"))();
-    loadstring(game:HttpGet("https://raw.githubusercontent.com/NetlessScripter/Universal-KJ-Port/refs/heads/main/Sound%20Module"))();
 end);
 
 local l_SoundService_0 = game:service("SoundService");
@@ -74,9 +73,21 @@ local v4 = {
     [8] = "Unlimited Flex Works",
 };
 
+-- Move activation URLs
+local v_MoveURLs = {
+    ["Ravage"]          = "https://raw.githubusercontent.com/NetlessScripter/Universal-KJ-Port/refs/heads/main/Ravage",
+    ["Swift Sweep"]     = "https://raw.githubusercontent.com/NetlessScripter/Universal-KJ-Port/refs/heads/main/Swift%20Sweep",
+    ["Collateral Ruin"] = "https://raw.githubusercontent.com/NetlessScripter/Universal-KJ-Port/refs/heads/main/Collateral%20Ruin",
+    ["Spiraling Storm"] = "https://raw.githubusercontent.com/NetlessScripter/Universal-KJ-Port/refs/heads/main/Spiraling%20Storm%20(W.I.P)",
+    ["Stoic Bomb"]      = "https://raw.githubusercontent.com/NetlessScripter/Universal-KJ-Port/refs/heads/main/Stoic%20Bomb%20(Port)",
+};
+
 local v5 = {};
 local v6 = {};
 local v7 = {};
+
+-- Forward-declare page switch functions so the hotbar loop closures can reference them
+local switchToNormalPage, switchToUltPage;
 
 for v8 = 1, 13 do
     local v9 = l_HotbarFrame_0[tostring(v8)];
@@ -86,15 +97,14 @@ for v8 = 1, 13 do
         v5[v4[v8]] = v8;
     end;
     local l_Overlay_0 = v9.Base.Overlay;
-    l_Overlay_0.MouseEnter:Connect(function() --[[ Line: 58 ]]
+    l_Overlay_0.MouseEnter:Connect(function()
         if shared.Fatigued then return end;
         l_Overlay_0.ImageTransparency = 0;
     end);
-    l_Overlay_0.MouseLeave:Connect(function() --[[ Line: 62 ]]
+    l_Overlay_0.MouseLeave:Connect(function()
         l_Overlay_0.ImageTransparency = 1;
     end);
-    l_Overlay_0:GetPropertyChangedSignal("ImageTransparency"):Connect(function() --[[ Line: 66 ]]
-        -- upvalues: l_Overlay_0 (copy), v4 (copy), v3 (copy), v36 (copy)
+    l_Overlay_0:GetPropertyChangedSignal("ImageTransparency"):Connect(function()
         if l_Overlay_0.ImageTransparency == 0 then
             if shared.Fatigued then
                 return;
@@ -102,6 +112,13 @@ for v8 = 1, 13 do
             local v10 = v4[v8];
             print(v10);
             if v10 then
+                -- Fire the move's activation script
+                if v_MoveURLs[v10] then
+                    pcall(function()
+                        loadstring(game:HttpGet(v_MoveURLs[v10]))();
+                    end);
+                end;
+
                 shared.MoveFatigue({
                     Name = v10,
                 });
@@ -111,13 +128,43 @@ for v8 = 1, 13 do
                         Cooldown = v3[v10],
                     });
                 end;
+
+                -- If an ult move (slots 5–8) was used, return to normal page
+                if v8 >= 5 and v8 <= 8 then
+                    switchToNormalPage();
+                end;
             end;
         end;
     end);
 end;
 
-function shared.CooldownIndicator(v11) --[[ Line: 79 ]]
-    -- upvalues: v5 (copy), l_HotbarFrame_0 (copy), l_CooldownTemplate_0 (copy), l_TweenService_0 (copy), l_Debris_0 (copy), v6 (ref)
+-- Hide ult move slots (5–8) by default; they only show after awakening
+for i = 5, 8 do
+    if v7[i] then
+        v7[i].Visible = false;
+    end;
+end;
+
+-- Page switch implementations (now that v7 is fully populated)
+switchToNormalPage = function()
+    for i = 5, 8 do
+        if v7[i] then v7[i].Visible = false; end;
+    end;
+    for i = 1, 4 do
+        if v7[i] then v7[i].Visible = true; end;
+    end;
+end;
+
+switchToUltPage = function()
+    for i = 1, 4 do
+        if v7[i] then v7[i].Visible = false; end;
+    end;
+    for i = 5, 8 do
+        if v7[i] then v7[i].Visible = true; end;
+    end;
+end;
+
+function shared.CooldownIndicator(v11)
     local v12 = v11.Name;
     local v13 = v11.Cooldown;
     local v14 = v5[v12];
@@ -141,8 +188,7 @@ function shared.CooldownIndicator(v11) --[[ Line: 79 ]]
     l_TweenService_0:Create(v16, TweenInfo.new(v13, Enum.EasingStyle.Linear, Enum.EasingDirection.Out), {
         Size = UDim2.new(1, 0, 0, 0),
     }):Play();
-    task.delay(v13, function() --[[ Line: 105 ]]
-        -- upvalues: v16 (copy), v15 (copy), l_CooldownTemplate_0 (copy), l_TweenService_0 (copy), l_Debris_0 (copy)
+    task.delay(v13, function()
         if v16.Parent then
             local v18 = l_CooldownTemplate_0:Clone();
             v18.Name = "";
@@ -156,8 +202,7 @@ function shared.CooldownIndicator(v11) --[[ Line: 79 ]]
         end;
     end);
     local v19 = nil;
-    v19 = v15:GetPropertyChangedSignal("Visible"):Connect(function() --[[ Line: 122 ]]
-        -- upvalues: v15 (copy), v16 (copy), l_Debris_0 (copy), v19 (ref)
+    v19 = v15:GetPropertyChangedSignal("Visible"):Connect(function()
         if not v15.Visible then
             l_Debris_0:AddItem(v16, 0);
             v19:Disconnect();
@@ -173,8 +218,7 @@ v37.Parent = game:service("ReplicatedStorage");
 
 local l_FatigueToken_0 = 0;
 
-local function v38(v39) --[[ Line: 131 ]]
-    -- upvalues: l_LocalPlayer_0 (copy), v37 (copy)
+local function v38(v39)
     local l_Character_1 = l_LocalPlayer_0.Character;
     if not l_Character_1 then
         return;
@@ -191,8 +235,7 @@ local function v38(v39) --[[ Line: 131 ]]
     end;
 end;
 
-local function v42() --[[ Line: 148 ]]
-    -- upvalues: l_LocalPlayer_0 (copy), v37 (copy)
+local function v42()
     for _, v43 in pairs(v37:GetChildren()) do
         if v43:IsA("Tool") then
             v43.Parent = l_LocalPlayer_0.Backpack;
@@ -200,8 +243,7 @@ local function v42() --[[ Line: 148 ]]
     end;
 end;
 
-function shared.MoveFatigue(v44) --[[ Line: 158 ]]
-    -- upvalues: v36 (copy), v38 (copy), v42 (copy), l_FatigueToken_0 (ref)
+function shared.MoveFatigue(v44)
     local v45 = v44.Name;
     local v46 = v36[v45];
     if not v46 or v46 <= 0 then
@@ -210,10 +252,9 @@ function shared.MoveFatigue(v44) --[[ Line: 158 ]]
     shared.Fatigued = true;
     l_FatigueToken_0 = l_FatigueToken_0 + 1;
     local l_Token_0 = l_FatigueToken_0;
-    local function v47() --[[ Line: 166 ]]
-        -- upvalues: v45 (copy), v46 (copy), l_Token_0 (copy)
+    local function v47()
         v38(v45);
-        task.delay(v46, function() --[[ Line: 170 ]]
+        task.delay(v46, function()
             if l_FatigueToken_0 == l_Token_0 then
                 shared.Fatigued = false;
                 v42();
@@ -221,8 +262,7 @@ function shared.MoveFatigue(v44) --[[ Line: 158 ]]
         end);
     end;
     if v45 == "Ravage" then
-        task.delay(0.7, function() --[[ Line: 177 ]]
-            -- upvalues: v47 (copy)
+        task.delay(0.7, function()
             v47();
         end);
     else
@@ -230,8 +270,7 @@ function shared.MoveFatigue(v44) --[[ Line: 158 ]]
     end;
 end;
 
-function shared.ResetCooldowns(v46) --[[ Line: 183 ]]
-    -- upvalues: v6 (copy), l_CooldownTemplate_0 (copy), l_TweenService_0 (copy), l_Debris_0 (copy)
+function shared.ResetCooldowns(v46)
     for _, v47 in pairs(v6) do
         if not table.find(v46.Exclusion, v47[2]) then
             local v48 = v47[1];
@@ -258,11 +297,84 @@ local l_Ult_0 = l_PlayerGui_0.Bar.MagicHealth.Ult;
 l_Bar_0.Size = UDim2.new((l_LocalPlayer_0:GetAttribute("Ultimate") or 0) / v1, 0, 0, 25);
 l_Ult_0.Visible = (l_LocalPlayer_0:GetAttribute("Ultimate") or 0) >= v1;
 
-local function v51() --[[ Line: 204 ]]
-    -- upvalues: l_LocalPlayer_0 (copy), l_Bar_0 (copy), l_Ult_0 (copy), v1 (copy)
+local function v51()
     local v52 = l_LocalPlayer_0:GetAttribute("Ultimate") or 0;
     l_Bar_0:TweenSize(UDim2.new(v52 / v1, 0, 0, 25), nil, nil, 0.4, true);
     l_Ult_0.Visible = v52 >= v1;
 end;
 
 l_LocalPlayer_0:GetAttributeChangedSignal("Ultimate"):Connect(v51);
+
+------------------------------------------------------------------------
+-- ULT SYSTEM
+------------------------------------------------------------------------
+
+local l_BarFrame_0     = l_PlayerGui_0.Bar.MagicHealth;
+local l_HotbarFrame_1  = l_PlayerGui_0.Hotbar.Backpack;  -- parent frame of the hotbar
+
+-- Store original on-screen positions to restore later
+local l_BarOrigPos_0     = l_BarFrame_0.Position;
+local l_HotbarOrigPos_0  = l_HotbarFrame_1.Position;
+
+-- Off-screen position: push both 2 full screen-heights downward
+local l_BarOffPos_0    = UDim2.new(
+    l_BarOrigPos_0.X.Scale, l_BarOrigPos_0.X.Offset,
+    l_BarOrigPos_0.Y.Scale + 2, l_BarOrigPos_0.Y.Offset
+);
+local l_HotbarOffPos_0 = UDim2.new(
+    l_HotbarOrigPos_0.X.Scale, l_HotbarOrigPos_0.X.Offset,
+    l_HotbarOrigPos_0.Y.Scale + 2, l_HotbarOrigPos_0.Y.Offset
+);
+
+local l_UltTweenInfo_0 = TweenInfo.new(1, Enum.EasingStyle.Quad, Enum.EasingDirection.InOut);
+local l_UltActive_0    = false;
+
+-- Shared ult activation logic (used by both click and keyboard)
+local function activateUlt()
+    if l_UltActive_0 then return end;
+    if (l_LocalPlayer_0:GetAttribute("Ultimate") or 0) < v1 then return end;
+
+    l_UltActive_0 = true;
+
+    l_LocalPlayer_0:SetAttribute("Ultimate", 0);
+
+    pcall(function()
+        loadstring(game:HttpGet("https://raw.githubusercontent.com/NetlessScripter/Universal-KJ-Port/refs/heads/main/KJ%20Awaken"))();
+    end);
+
+    l_TweenService_0:Create(l_BarFrame_0,    l_UltTweenInfo_0, {Position = l_BarOffPos_0}):Play();
+    l_TweenService_0:Create(l_HotbarFrame_1, l_UltTweenInfo_0, {Position = l_HotbarOffPos_0}):Play();
+
+    task.spawn(function()
+        task.wait(9.4);
+        switchToUltPage();
+        l_TweenService_0:Create(l_BarFrame_0,    l_UltTweenInfo_0, {Position = l_BarOrigPos_0}):Play();
+        l_TweenService_0:Create(l_HotbarFrame_1, l_UltTweenInfo_0, {Position = l_HotbarOrigPos_0}):Play();
+        task.wait(1);
+        l_UltActive_0 = false;
+    end);
+end;
+
+-- PC support: G key OR Mouse1 click on the Bar frame
+-- Using UserInputService for both avoids the ImageButton layering/interception bug
+-- where other GUI elements inside the frame silently consume the click first.
+-- G key support
+local l_UserInputService_0 = game:GetService("UserInputService");
+l_UserInputService_0.InputBegan:Connect(function(input, gameProcessed)
+    if gameProcessed then return end;
+    if input.KeyCode == Enum.KeyCode.G then
+        activateUlt();
+    end;
+end);
+
+-- Mouse1 click on the Bar frame
+-- Disable Active on all children inside the button so they don't steal the click
+local l_UltButton_0 = l_PlayerGui_0.Bar.MagicHealth.ImageButton;
+for _, v in ipairs(l_UltButton_0:GetDescendants()) do
+    if v:IsA("GuiObject") then
+        v.Active = false;
+    end;
+end;
+l_UltButton_0.MouseButton1Click:Connect(function()
+    activateUlt();
+end);
