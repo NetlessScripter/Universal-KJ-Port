@@ -790,110 +790,6 @@ local function restoreDefaultAnims(char)
 end
 
 -- ─────────────────────────────────────────────
---  Replication layer
---
---  WHY THIS EXISTS
---  ───────────────
---  The AnimPlayer loop sets Motor6D.C0 directly on
---  RenderStepped.  Motor6D property writes by a client
---  script are NEVER replicated to the server or to
---  other clients — Roblox only replicates Motor6D
---  changes that originate from the server side.
---
---  The only client-driven pathway that IS replicated
---  is Animator:LoadAnimation():Play() called from a
---  LocalScript that owns the character.  Roblox's
---  internal AnimationReplicator picks up every
---  AnimationTrack state change and broadcasts it so
---  every other client and the server see the animation.
---
---  STRATEGY
---  ─────────
---  We fire startReplicationTrack() right after the
---  manual Motor6D player starts.  Two things happen:
---
---    • OTHER CLIENTS / SERVER  → they see the official
---      Roblox AnimationTrack playing; replication is
---      handled automatically.
---
---    • LOCAL CLIENT            → the manual Motor6D
---      player runs every RenderStepped and directly
---      writes motor.C0 AFTER the Animator has already
---      written it (RenderStepped fires after Stepped,
---      which is when the Animator updates joints), so
---      the manual player always wins locally and you
---      get pixel-perfect local accuracy.
---
---  GLOBAL ENV FUNCTIONS LEVERAGED
---  ────────────────────────────────
---  getgenv()           — shared global table; lets us
---                        store the track reference
---                        across re-executions.
---  setthreadidentity() — escalate to identity 6+ so
---                        Animator:LoadAnimation is
---                        callable without restriction
---                        even if the game locked it.
---  getconnections()    — (available if needed) inspect
---                        the AnimationTrack's internal
---                        signals to hook speed/stop
---                        events without polling.
---  firesignal()        — (available if needed) can
---                        manually fire AnimationPlayed
---                        on the Animator for edge-case
---                        games that filter the signal.
--- ─────────────────────────────────────────────
-local function startReplicationTrack(rawId, speed, looped)
-    local id = cleanId(rawId)
-
-    -- Ensure an Animator exists (it always does for player chars,
-    -- but create one defensively in case it was stripped).
-    local animator = humanoid:FindFirstChildOfClass("Animator")
-    if not animator then
-        animator = Instance.new("Animator")
-        animator.Parent = humanoid
-    end
-
-    local animObj        = Instance.new("Animation")
-    animObj.AnimationId  = "rbxassetid://" .. id
-
-    -- Load the track at a raised identity so games that gate
-    -- LoadAnimation behind PluginSecurity can't block us.
-    local track
-    withIdentity(6, function()
-        local ok, t = pcall(function()
-            return animator:LoadAnimation(animObj)
-        end)
-        if ok then track = t end
-    end)
-    if not track then return nil end
-
-    -- Action4 = highest priority so the track wins over any
-    -- leftover default-animation tracks on other clients.
-    track.Priority = Enum.AnimationPriority.Action4
-    track.Looped   = (looped == nil) and true or looped
-
-    local playOk = pcall(function()
-        track:Play(0, 1, speed or 1)   -- fadeTime=0, weight=1
-    end)
-
-    if not playOk then
-        pcall(function() track:Destroy() end)
-        return nil
-    end
-
-    getgenv().currentAnimator6DReplicationTrack = track
-    return track
-end
-
-local function stopReplicationTrack()
-    local track = getgenv().currentAnimator6DReplicationTrack
-    if track then
-        pcall(function() track:Stop(0) end)
-        getgenv().currentAnimator6DReplicationTrack = nil
-    end
-end
-
--- ─────────────────────────────────────────────
 --  Animation.Completed signal
 --  Fires when a non-looped animation finishes.
 --  Usage:
@@ -918,8 +814,6 @@ getgenv().Animator6D = function(idOrInstance, speed, looped)
             return
         end
 
-        -- Stop any running replication track from the previous call
-        stopReplicationTrack()
         suppressDefaultAnims(character)
         if getgenv().currentAnimator6D then
             pcall(function() getgenv().currentAnimator6D:Stop(true) end)
@@ -942,9 +836,6 @@ getgenv().Animator6D = function(idOrInstance, speed, looped)
 
         getgenv().currentAnimator6D = anim
         anim:Play(speed or 1, looped)
-        -- NOTE: no asset ID available on this path, so server-side
-        -- replication is not possible.  Use Animator6D("assetId")
-        -- instead of passing a KFS Instance if you need replication.
 
     else
         task.spawn(function()
@@ -955,7 +846,6 @@ getgenv().Animator6D = function(idOrInstance, speed, looped)
             --  from the saved frames without hitting the network at all.
             local cachedFrames, cachedLoop = readAnimCache(cId)
             if cachedFrames then
-                stopReplicationTrack()
                 suppressDefaultAnims(character)
                 if getgenv().currentAnimator6D then
                     pcall(function() getgenv().currentAnimator6D:Stop(true) end)
@@ -973,16 +863,6 @@ getgenv().Animator6D = function(idOrInstance, speed, looped)
                     end
                     getgenv().currentAnimator6D = anim
                     anim:Play(speed or 1, isLooped)
-                    -- ── Server replication via Animator ───────────────────────
-                    --  AnimationTrack:Play() from a LocalScript on the local
-                    --  player's character is automatically broadcast to the server
-                    --  and all other clients by Roblox's AnimationReplicator.
-                    --  The manual Motor6D player still owns the LOCAL visual
-                    --  (RenderStepped fires after Stepped, overwriting Animator's
-                    --  C0 assignments every frame), so both paths coexist cleanly.
-                    task.defer(function()
-                        startReplicationTrack(cId, speed or 1, isLooped)
-                    end)
                     return
                 end
                 -- cache was corrupt / unusable — fall through to fresh fetch
@@ -995,7 +875,6 @@ getgenv().Animator6D = function(idOrInstance, speed, looped)
                 return
             end
 
-            stopReplicationTrack()
             suppressDefaultAnims(character)
             if getgenv().currentAnimator6D then
                 pcall(function() getgenv().currentAnimator6D:Stop(true) end)
@@ -1025,13 +904,6 @@ getgenv().Animator6D = function(idOrInstance, speed, looped)
 
             getgenv().currentAnimator6D = anim
             anim:Play(speed or 1, looped)
-            -- ── Server replication via Animator ───────────────────────────
-            --  task.defer lets the AnimPlayer's RenderStepped connection
-            --  register first so there's zero chance the Animator's initial
-            --  pose overrides our manual one on frame 0.
-            task.defer(function()
-                startReplicationTrack(cId, speed or 1, isLooped)
-            end)
         end)
     end
 end
@@ -1041,9 +913,6 @@ getgenv().Animator6DStop = function()
         pcall(function() getgenv().currentAnimator6D:Stop(true) end)
         getgenv().currentAnimator6D = nil
     end
-    -- Kill the Animator-based replication track so other clients
-    -- stop seeing the animation the moment you call Stop().
-    stopReplicationTrack()
 end
 
 -- ─────────────────────────────────────────────
