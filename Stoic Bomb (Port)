@@ -446,91 +446,6 @@ local R6Map = {
 }
 
 -- ─────────────────────────────────────────────
---  R15 → R6 pose conversion
---
---  R15 KFS stores poses under part names like
---  "LowerTorso", "RightUpperArm", etc.
---  R6 motors expect names like "RootJoint",
---  "Right Shoulder", etc.
---
---  Multi-part chains (LowerTorso + UpperTorso →
---  RootJoint) are COMPOSED in order so the full
---  torso rotation is preserved and the result
---  doesn't look like a T-pose or snapped neck.
--- ─────────────────────────────────────────────
-
--- Maps each R15 part name → the R6 motor it drives
-local R15PartToMotor = {
-    ["LowerTorso"]    = "RootJoint",
-    ["UpperTorso"]    = "RootJoint",    -- composed on top of LowerTorso
-    ["Head"]          = "Neck",
-    ["RightUpperArm"] = "Right Shoulder",
-    ["RightLowerArm"] = "Right Shoulder", -- elbow composed into shoulder
-    ["LeftUpperArm"]  = "Left Shoulder",
-    ["LeftLowerArm"]  = "Left Shoulder",  -- elbow composed into shoulder
-    ["RightUpperLeg"] = "Right Hip",      -- legs: upper only, no knee
-    ["LeftUpperLeg"]  = "Left Hip",
-}
-
--- Composition order for parts that share a motor (lower = applied first)
-local R15ComposeOrder = {
-    LowerTorso    = 1,
-    UpperTorso    = 2,
-    RightUpperArm = 1,
-    RightLowerArm = 2,
-    LeftUpperArm  = 1,
-    LeftLowerArm  = 2,
-}
-
-local function isR15Poses(poses)
-    return  poses["UpperTorso"]    ~= nil
-         or poses["LowerTorso"]    ~= nil
-         or poses["RightUpperArm"] ~= nil
-         or poses["RightLowerArm"] ~= nil
-         or poses["LeftUpperArm"]  ~= nil
-         or poses["LeftLowerArm"]  ~= nil
-         or poses["RightUpperLeg"] ~= nil
-         or poses["LeftUpperLeg"]  ~= nil
-end
-
-local function convertR15ToR6Poses(poses)
-    -- Bucket each contributing R15 part under its target R6 motor
-    local motorContribs = {}
-    for partName, poseData in pairs(poses) do
-        local motor = R15PartToMotor[partName]
-        if motor then
-            if not motorContribs[motor] then
-                motorContribs[motor] = {}
-            end
-            table.insert(motorContribs[motor], {
-                order = R15ComposeOrder[partName] or 99,
-                pose  = poseData,
-            })
-        end
-    end
-
-    -- Build R6-keyed pose table, composing multi-part chains in order
-    local r6Poses = {}
-    for motorName, contribs in pairs(motorContribs) do
-        table.sort(contribs, function(a, b) return a.order < b.order end)
-
-        -- Start with the first part's CFrame, then multiply the rest on top
-        local cf = contribs[1].pose.CFrame
-        for i = 2, #contribs do
-            cf = cf * contribs[i].pose.CFrame
-        end
-
-        r6Poses[motorName] = {
-            CFrame          = cf,
-            EasingStyle     = contribs[1].pose.EasingStyle,
-            EasingDirection = contribs[1].pose.EasingDirection,
-        }
-    end
-
-    return r6Poses
-end
-
--- ─────────────────────────────────────────────
 --  KeyframeSequence parser
 -- ─────────────────────────────────────────────
 local function parseSequence(kfs)
@@ -551,13 +466,6 @@ local function parseSequence(kfs)
                     EasingDirection = pose.EasingDirection,
                 }
             end
-        end
-        -- If this is an R15 animation, remap the multi-part pose tree
-        -- into the flat R6 motor-name keyed table that _sampleFrame expects.
-        -- LowerTorso + UpperTorso are composed so the full torso rotation
-        -- is preserved and the character doesn't look broken on R6.
-        if isR15Poses(entry.Poses) then
-            entry.Poses = convertR15ToR6Poses(entry.Poses)
         end
         table.insert(frames, entry)
     end
