@@ -1,927 +1,490 @@
---[[
-================================================================================
-  EXTRACTION ANALYSIS — KjCounter_Apply.lua
-================================================================================
+-- KjCounter - Converted to work on local player
+-- Support functions extracted from tsb_interpreter
 
-  SOURCE
-  ------
-  Stripped from tsb_interpreter.txt — the full TSB (The Strongest Battlegrounds)
-  LocalScript, deobfuscated from bytecode (~149,235 lines).
+local Players = game:GetService("Players")
+local TweenService = game:GetService("TweenService")
+local Debris = game:GetService("Debris")
 
-  EFFECTS KEPT
-  ------------
-    "KjCounter" — dual-branch effect (interpreter lines 141498–142188)
-      Branch A: Spin = true  → SpinEvent: spinning victim hold + Toss release VFX
-      Branch B: Spin = false → FirstEvent: swing + hit + upwave sequence
-
-  ANIMATION CHECK — REMOVED
-  -------------------------
-  KjCounter had NO GetPlayingAnimationTracks gate. The block branches only on
-  v1090.Spin. VFX fires unconditionally.
-
-  PrimaryPart — REPLACED
-  ----------------------
-  All l_Char_38.PrimaryPart references changed to l_Char_38.HumanoidRootPart.
-
-  DEPENDENCIES INCLUDED
-  ----------------------
-    v10   TweenService
-    v989  particle lifetime scaler
-    v1000 FX clone + place helper
-    v1014 particle emitter / beam helper
-    v1021 particle enable/disable toggle
-    v1058 effects-cache / maid factory
-
-  STRIPPED
-  --------
-    Animation gate (none present — confirmed)
-    v6 vararg shim, script.Parent cleanup
-    All other v12 effect blocks
-    All unrelated globals
-
-  ENTRY POINT
-  -----------
-    Fires v12({ Type = "KjCounter", Char = character, Victim = character, Spin = false })
-    Set Spin = true to trigger the spin+toss branch instead.
-    Add your animation ID to the Animator6D call below.
-
-================================================================================
-]]
+local LocalPlayer = Players.LocalPlayer
+local Character = LocalPlayer.Character or LocalPlayer.CharacterAdded:Wait()
 
 -- ============================================================
--- GLOBALS
+-- SUPPORT FUNCTIONS
 -- ============================================================
-local v10 = game:GetService("TweenService");
-local v12 = nil;
 
--- ============================================================
--- v989: particle lifetime scaler
--- ============================================================
-local function v989(v984) --[[ Line: 4583 ]]
-    local l_FX_1 = v984.FX;
-    local l_Scale_0 = v984.Scale;
-    for _, v988 in pairs(l_FX_1:GetDescendants()) do
-        if v988:IsA("ParticleEmitter") then
-            v988.Lifetime = NumberRange.new(v988.Lifetime.Min * l_Scale_0, v988.Lifetime.Max * l_Scale_0);
-        end;
-    end;
-end;
-
--- ============================================================
--- v1000: FX clone + place helper
--- ============================================================
-local function v1000(v997) --[[ Line: 4643 ]]
-    local l_FX_2 = v997.FX;
-    local l_Anchor_1 = v997.Anchor;
-    l_FX_2 = l_FX_2:Clone();
-    if l_FX_2:IsA("Model") then
-        l_FX_2:PivotTo(l_Anchor_1);
-    elseif l_FX_2:IsA("BasePart") then
-        l_FX_2.CFrame = l_Anchor_1;
-    end;
-    if l_FX_2:IsA("Attachment") then
-        l_FX_2.Parent = l_Anchor_1;
-    else
-        l_FX_2.Parent = workspace.Thrown;
-    end;
-    game.Debris:AddItem(l_FX_2, 30);
-    return l_FX_2;
-end;
-
--- ============================================================
--- v1014: particle emitter / beam helper
--- ============================================================
-local function v1014(v1001, v1002, v1003) --[[ Line: 4666 ]]
-    for _, v1005 in pairs(v1001:GetDescendants()) do
-        if v1005:IsA("ParticleEmitter") then
-            local l_v1005_Attributes_0 = v1005:GetAttributes();
-            local l_EmitDelay_0 = l_v1005_Attributes_0.EmitDelay;
-            if l_EmitDelay_0 then
-                local l_l_v1005_Attributes_0_0 = l_v1005_Attributes_0;
-                task.delay(l_EmitDelay_0, function()
-                    v1005:Emit(l_l_v1005_Attributes_0_0.EmitCount);
-                end);
-            else
-                v1005:Emit(l_v1005_Attributes_0.EmitCount);
-            end;
-            if l_v1005_Attributes_0.EmitDuration then
-                v1005.Enabled = true;
-                task.delay(l_v1005_Attributes_0.EmitDuration, function()
-                    v1005.Enabled = false;
-                end);
-            end;
-        end;
-        if v1005:IsA("Beam") then
-            local l_v1005_Attributes_1 = v1005:GetAttributes();
-            local l_Duration_0 = l_v1005_Attributes_1.Duration;
-            local v1011 = 0.5;
-            if v1003 and v1003.TweenTime then
-                v1011 = v1003.TweenTime;
-            end;
-            do
-                local l_v1011_0 = v1011;
-                local function v1013()
-                    game:GetService("TweenService"):Create(v1005, TweenInfo.new(l_v1011_0, Enum.EasingStyle.Sine, Enum.EasingDirection.Out), {
-                        Width1 = 0,
-                        Width0 = 0
-                    }):Play();
-                end;
-                (function()
-                    game:GetService("TweenService"):Create(v1005, TweenInfo.new(l_v1011_0, Enum.EasingStyle.Sine, Enum.EasingDirection.Out), {
-                        Width1 = l_v1005_Attributes_1.Width1,
-                        Width0 = l_v1005_Attributes_1.Width0
-                    }):Play();
-                end)();
-                if l_Duration_0 then
-                    task.delay(l_Duration_0, function()
-                        v1013();
-                    end);
-                end;
-            end;
-        end;
-    end;
-    if v1002 then
-        game.Debris:AddItem(v1001, v1002);
-    end;
-end;
-
--- ============================================================
--- v1021: particle enable / disable toggle
--- ============================================================
-local function v1021(v1015) --[[ Line: 4724 ]]
-    local l_FX_3 = v1015.FX;
-    if v1015.On then
-        for _, v1018 in pairs(l_FX_3:GetDescendants()) do
-            if v1018:IsA("ParticleEmitter") then
-                v1018.Enabled = true;
-            end;
-        end;
-        return;
-    else
-        for _, v1020 in pairs(l_FX_3:GetDescendants()) do
-            if v1020:IsA("ParticleEmitter") then
-                v1020.Enabled = false;
-            end;
-        end;
-        return;
-    end;
-end;
-
--- ============================================================
--- v1058: effects-cache / maid factory
--- ============================================================
-local function v1058(v1035, v1036, v1037) --[[ Line: 4786 ]]
-    local v1038 = {};
-    for _, v1040 in pairs(v1035:GetChildren()) do
-        v1038[v1040.Name] = v1040;
-    end;
-    local v1048 = setmetatable({}, {
-        __index = function(_, v1042)
-            return {
-                Clone = function(_)
-                    local v1044 = rawget(v1038, v1042):Clone();
-                    if not table.find(v1036, v1044) then
-                        table.insert(v1036, v1044);
-                    end;
-                    return v1044;
-                end,
-                GetChildren = function(_)
-                    return rawget(v1038, v1042):GetChildren();
-                end,
-                GetAttribute = function(_, v1047)
-                    return rawget(v1038, v1042):GetAttribute(v1047);
-                end
-            };
-        end
-    });
-    local v1049 = {
-        _maid = {}
-    };
-    local function v1052(_, v1051)
-        if not table.find(v1036, v1051) then
-            table.insert(v1036, v1051);
-        end;
-        return v1051;
-    end;
-    v1049._maid.give = v1052;
-    v1052 = function(_, v1054)
-        if not table.find(v1036, v1054) then
-            table.insert(v1036, v1054);
-        end;
-        return v1054;
-    end;
-    v1049._maid.giveTask = v1052;
-    v1052 = function()
-        if v1048 and v1049 then
-            table.clear(v1048);
-            table.clear(v1049);
-        end;
-        if v1038 then
-            table.clear(v1038);
-            v1038 = nil;
-        end;
-        v1049 = nil;
-        v1048 = nil;
-        if v1036 then
-            for v1055, v1056 in pairs(v1036) do
-                if typeof(v1056) == "RBXScriptConnection" then
-                    v1056:Disconnect();
-                elseif typeof(v1056) == "Instance" then
-                    v1056:Destroy();
-                end;
-                v1036[v1055] = nil;
-            end;
-            table.clear(v1036);
-        end;
-        v1036 = nil;
-    end;
-    local v1057 = 10;
-    if v1037 ~= nil and typeof(v1037) == "number" then
-        v1057 = v1037;
-    end;
-    task.delay(v1057, v1052);
-    return v1048, v1049, v1052;
-end;
-
--- ============================================================
--- v12: EFFECT DISPATCHER
--- ============================================================
-v12 = function(v1090)
-
-    if v1090.Type == "KjCounter" then
-        local v30106 = {};
-        local l_KJThrow_0 = game.ReplicatedStorage.Resources.KJThrow;
-        local _, v30109 = v1058(l_KJThrow_0, v30106, 10);
-        local l_Char_38 = v1090.Char;
-        local _ = v1090.Victim;
-        local _ = game:GetService("TweenService");
-        local _ = workspace.Thrown;
-        local l_wait_41 = task.wait;
-        -- PrimaryPart → HumanoidRootPart
-        local l_PrimaryPart_134 = l_Char_38.HumanoidRootPart;
-        local _ = Random.new();
-        if v1090.Spin then
-            local l_l_PrimaryPart_134_0 = l_PrimaryPart_134;
-            local l_l_wait_41_0 = l_wait_41;
-            local l_l_KJThrow_0_0 = l_KJThrow_0;
-            local l_v30109_0 = v30109;
-            local function v30199() --[[ Line: 64117 ]] --[[ Name: SpinEvent ]]
-                local l_Position_108 = l_l_PrimaryPart_134_0.Position;
-                local v30122, v30123 = workspace:FindFirstChildOfClass("Camera"):WorldToScreenPoint(l_Position_108);
-                local l_v30123_0 = v30123;
-                l_Position_108 = {};
-                v30122 = -5;
-                task.spawn(function() --[[ Line: 64124 ]]
-                    if not l_v30123_0 then
-                        return;
-                    else
-                        local v30125 = tick();
-                        while tick() - v30125 < 4 do
-                            for _, v30127 in pairs(l_Position_108) do
-                                v30127.PrimaryPart.CFrame = v30127.PrimaryPart.CFrame * CFrame.Angles(0, 0, (math.rad(v30122)));
-                                v30127.PrimaryPart.Position = l_l_PrimaryPart_134_0.CFrame * CFrame.new(0, 0, -1).Position - Vector3.new(0, l_l_PrimaryPart_134_0.Size.Y * 1.5, 0);
-                            end;
-                            l_l_wait_41_0(0.01);
-                        end;
-                        return;
-                    end;
-                end);
-                task.spawn(function() --[[ Line: 64142 ]]
-                    local v30128 = v1000({
-                        FX = l_l_KJThrow_0_0.Spinning,
-                        Anchor = l_l_PrimaryPart_134_0.CFrame * CFrame.new(0, -l_l_PrimaryPart_134_0.Size.Y * 1.5, 0) * CFrame.Angles(1.5707963267948966, 0, 0),
-                        Maid = l_v30109_0._maid
-                    });
-                    game.Debris:AddItem(v30128, 5);
-                    v1021({
-                        FX = v30128,
-                        On = true
-                    });
-                    v30128:ScaleTo(0.7);
-                    table.insert(l_Position_108, v30128);
-                    for v30129 = 1, 12 do
-                        if l_v30123_0 then
-                            local v30130 = v30129 * 0.01;
-                            local v30131 = l_l_KJThrow_0_0.TestWind2:Clone();
-                            game.Debris:AddItem(v30131, 5);
-                            v30131:ScaleTo(0.45 + v30130);
-                            local v30132 = {
-                                Model = v30131,
-                                Anchor = l_l_PrimaryPart_134_0.CFrame * CFrame.new(0, -1, -1) * CFrame.Angles(0, -0.7853981633974483, 1.5707963267948966),
-                                Info = TweenInfo.new(0.4, Enum.EasingStyle.Sine)
-                            };
-                            local l_v30132_0 = v30132;
-                            task.spawn(function() --[[ Line: 4475 ]]
-                                local l_Model_465 = l_v30132_0.Model;
-                                local v30135 = l_v30132_0.Info or TweenInfo.new(1, Enum.EasingStyle.Sine);
-                                local l_Start_490 = l_Model_465:FindFirstChild("Start");
-                                local l_End_484 = l_Model_465:FindFirstChild("End");
-                                local l_Stay_460 = l_v30132_0.Stay;
-                                local l_Anchor_478 = l_v30132_0.Anchor;
-                                local v30140 = l_v30132_0.EndT or 1;
-                                local l_Del_459 = l_v30132_0.Del;
-                                local l_Skip_459 = l_v30132_0.Skip;
-                                if l_Start_490 and l_End_484 then
-                                    l_Model_465.PrimaryPart = l_Start_490;
-                                    if not l_Skip_459 then
-                                        for _, v30144 in pairs(l_Model_465:GetChildren()) do
-                                            if v30144:IsA("BasePart") then
-                                                v30144.CanCollide = false;
-                                                v30144.Anchored = true;
-                                            end;
-                                        end;
-                                    end;
-                                    if l_Anchor_478 then
-                                        l_Model_465:SetPrimaryPartCFrame(l_Anchor_478);
-                                    end;
-                                    if l_v30132_0.T then
-                                        l_Start_490.Transparency = l_v30132_0.T;
-                                    end;
-                                    l_End_484.Transparency = 1;
-                                    l_Model_465.Parent = workspace.Thrown;
-                                    local l_Decal_936 = l_Start_490:FindFirstChildOfClass("Decal");
-                                    local l_SpecialMesh_921 = l_Start_490:FindFirstChildOfClass("SpecialMesh");
-                                    local l_SpecialMesh_922 = l_End_484:FindFirstChildOfClass("SpecialMesh");
-                                    local l_Decal_937 = l_End_484:FindFirstChildOfClass("Decal");
-                                    if l_Decal_937 and not l_Skip_459 then
-                                        l_Decal_937.Transparency = 1;
-                                    end;
-                                    local v30149 = nil;
-                                    if l_Del_459 then
-                                        game:GetService("TweenService"):Create(l_Start_490, v30135, {
-                                            Size = l_End_484.Size,
-                                            CFrame = l_End_484.CFrame
-                                        }):Play();
-                                        task.delay(l_Del_459, function()
-                                            v30149 = game:GetService("TweenService"):Create(l_Start_490, v30135, {
-                                                Transparency = v30140
-                                            });
-                                            v30149:Play();
-                                            if l_Decal_936 then
-                                                for _, v30151 in pairs(l_Start_490:GetChildren()) do
-                                                    if v30151:IsA("Decal") then
-                                                        game:GetService("TweenService"):Create(v30151, v30135, {
-                                                            Transparency = v30140
-                                                        }):Play();
-                                                    end;
-                                                end;
-                                            end;
-                                            if l_SpecialMesh_921 then
-                                                v30149 = game:GetService("TweenService"):Create(l_SpecialMesh_921, v30135, {
-                                                    Scale = l_SpecialMesh_922.Scale
-                                                }):Play();
-                                            end;
-                                        end);
-                                    else
-                                        if l_SpecialMesh_921 then
-                                            game:GetService("TweenService"):Create(l_SpecialMesh_921, v30135, {
-                                                Scale = l_SpecialMesh_922.Scale
-                                            }):Play();
-                                        end;
-                                        if l_Decal_936 then
-                                            for _, v30153 in pairs(l_Start_490:GetChildren()) do
-                                                if v30153:IsA("Decal") then
-                                                    game:GetService("TweenService"):Create(v30153, v30135, {
-                                                        Transparency = v30140
-                                                    }):Play();
-                                                end;
-                                            end;
-                                            v30149 = game:GetService("TweenService"):Create(l_Start_490, v30135, {
-                                                Size = l_End_484.Size,
-                                                CFrame = l_End_484.CFrame
-                                            });
-                                            v30149:Play();
-                                        else
-                                            v30149 = game:GetService("TweenService"):Create(l_Start_490, v30135, {
-                                                Size = l_End_484.Size,
-                                                Transparency = v30140,
-                                                CFrame = l_End_484.CFrame
-                                            });
-                                            v30149:Play();
-                                        end;
-                                    end;
-                                    if not l_Stay_460 then
-                                        if l_Del_459 then
-                                            task.wait(l_Del_459 + 0.1);
-                                        end;
-                                        v30149.Completed:Connect(function()
-                                            l_Model_465:Destroy();
-                                        end);
-                                    end;
-                                    return;
-                                else
-                                    warn("NO START OR END");
-                                    return;
-                                end;
-                            end);
-                            if v30129 > 2 then
-                                v30132 = l_l_KJThrow_0_0.TEst:Clone();
-                                game.Debris:AddItem(v30132, 5);
-                                v30132:ScaleTo(1 + v30130);
-                                local v30154 = {
-                                    Model = v30132,
-                                    Anchor = l_l_PrimaryPart_134_0.CFrame * CFrame.new(0, -1, -1) * CFrame.Angles(0, -0.7853981633974483, 0),
-                                    Info = TweenInfo.new(0.8, Enum.EasingStyle.Sine)
-                                };
-                                task.spawn(function() --[[ Line: 4475 ]]
-                                    local l_Model_466 = v30154.Model;
-                                    local v30156 = v30154.Info or TweenInfo.new(1, Enum.EasingStyle.Sine);
-                                    local l_Start_491 = l_Model_466:FindFirstChild("Start");
-                                    local l_End_485 = l_Model_466:FindFirstChild("End");
-                                    local l_Stay_461 = v30154.Stay;
-                                    local l_Anchor_479 = v30154.Anchor;
-                                    local v30161 = v30154.EndT or 1;
-                                    local l_Del_460 = v30154.Del;
-                                    local l_Skip_460 = v30154.Skip;
-                                    if l_Start_491 and l_End_485 then
-                                        l_Model_466.PrimaryPart = l_Start_491;
-                                        if not l_Skip_460 then
-                                            for _, v30165 in pairs(l_Model_466:GetChildren()) do
-                                                if v30165:IsA("BasePart") then
-                                                    v30165.CanCollide = false;
-                                                    v30165.Anchored = true;
-                                                end;
-                                            end;
-                                        end;
-                                        if l_Anchor_479 then
-                                            l_Model_466:SetPrimaryPartCFrame(l_Anchor_479);
-                                        end;
-                                        if v30154.T then
-                                            l_Start_491.Transparency = v30154.T;
-                                        end;
-                                        l_End_485.Transparency = 1;
-                                        l_Model_466.Parent = workspace.Thrown;
-                                        local l_Decal_938 = l_Start_491:FindFirstChildOfClass("Decal");
-                                        local l_SpecialMesh_923 = l_Start_491:FindFirstChildOfClass("SpecialMesh");
-                                        local l_SpecialMesh_924 = l_End_485:FindFirstChildOfClass("SpecialMesh");
-                                        local l_Decal_939 = l_End_485:FindFirstChildOfClass("Decal");
-                                        if l_Decal_939 and not l_Skip_460 then
-                                            l_Decal_939.Transparency = 1;
-                                        end;
-                                        local v30170 = nil;
-                                        if l_Del_460 then
-                                            game:GetService("TweenService"):Create(l_Start_491, v30156, {
-                                                Size = l_End_485.Size,
-                                                CFrame = l_End_485.CFrame
-                                            }):Play();
-                                            task.delay(l_Del_460, function()
-                                                v30170 = game:GetService("TweenService"):Create(l_Start_491, v30156, {
-                                                    Transparency = v30161
-                                                });
-                                                v30170:Play();
-                                                if l_Decal_938 then
-                                                    for _, v30172 in pairs(l_Start_491:GetChildren()) do
-                                                        if v30172:IsA("Decal") then
-                                                            game:GetService("TweenService"):Create(v30172, v30156, {
-                                                                Transparency = v30161
-                                                            }):Play();
-                                                        end;
-                                                    end;
-                                                end;
-                                                if l_SpecialMesh_923 then
-                                                    v30170 = game:GetService("TweenService"):Create(l_SpecialMesh_923, v30156, {
-                                                        Scale = l_SpecialMesh_924.Scale
-                                                    }):Play();
-                                                end;
-                                            end);
-                                        else
-                                            if l_SpecialMesh_923 then
-                                                game:GetService("TweenService"):Create(l_SpecialMesh_923, v30156, {
-                                                    Scale = l_SpecialMesh_924.Scale
-                                                }):Play();
-                                            end;
-                                            if l_Decal_938 then
-                                                for _, v30174 in pairs(l_Start_491:GetChildren()) do
-                                                    if v30174:IsA("Decal") then
-                                                        game:GetService("TweenService"):Create(v30174, v30156, {
-                                                            Transparency = v30161
-                                                        }):Play();
-                                                    end;
-                                                end;
-                                                v30170 = game:GetService("TweenService"):Create(l_Start_491, v30156, {
-                                                    Size = l_End_485.Size,
-                                                    CFrame = l_End_485.CFrame
-                                                });
-                                                v30170:Play();
-                                            else
-                                                v30170 = game:GetService("TweenService"):Create(l_Start_491, v30156, {
-                                                    Size = l_End_485.Size,
-                                                    Transparency = v30161,
-                                                    CFrame = l_End_485.CFrame
-                                                });
-                                                v30170:Play();
-                                            end;
-                                        end;
-                                        if not l_Stay_461 then
-                                            if l_Del_460 then
-                                                task.wait(l_Del_460 + 0.1);
-                                            end;
-                                            v30170.Completed:Connect(function()
-                                                l_Model_466:Destroy();
-                                            end);
-                                        end;
-                                        return;
-                                    else
-                                        warn("NO START OR END");
-                                        return;
-                                    end;
-                                end);
-                            end;
-                        end;
-                    end;
-                    l_l_wait_41_0(0.1);
-                    local l_Position_109 = l_l_PrimaryPart_134_0.Position;
-                    local v30176, v30177 = workspace:FindFirstChildOfClass("Camera"):WorldToScreenPoint(l_Position_109);
-                    if not v30177 then
-                        return;
-                    else
-                        local v30178 = v1000({
-                            FX = l_l_KJThrow_0_0.Toss,
-                            Anchor = l_l_PrimaryPart_134_0.CFrame * CFrame.new(0, 0, -7) * CFrame.Angles(0, 0, 0),
-                            Maid = l_v30109_0._maid
-                        });
-                        game.Debris:AddItem(v30178, 5);
-                        v1014(v30178);
-                        v30178:ScaleTo(1.3);
-                        v30122 = -0.5;
-                        v1021({
-                            FX = v30128,
-                            On = false
-                        });
-                        l_Position_109 = l_l_KJThrow_0_0.Upwave2:Clone();
-                        game.Debris:AddItem(l_Position_109, 5);
-                        l_Position_109:ScaleTo(0.7);
-                        v30176 = {
-                            Model = l_Position_109,
-                            Anchor = l_l_PrimaryPart_134_0.CFrame * CFrame.Angles(0, 1.5707963267948966, 0),
-                            Info = TweenInfo.new(0.3, Enum.EasingStyle.Sine)
-                        };
-                        task.spawn(function() --[[ Line: 4475 ]]
-                            local l_Model_467 = v30176.Model;
-                            local v30180 = v30176.Info or TweenInfo.new(1, Enum.EasingStyle.Sine);
-                            local l_Start_492 = l_Model_467:FindFirstChild("Start");
-                            local l_End_486 = l_Model_467:FindFirstChild("End");
-                            local l_Stay_462 = v30176.Stay;
-                            local l_Anchor_480 = v30176.Anchor;
-                            local v30185 = v30176.EndT or 1;
-                            local l_Del_461 = v30176.Del;
-                            local l_Skip_461 = v30176.Skip;
-                            if l_Start_492 and l_End_486 then
-                                l_Model_467.PrimaryPart = l_Start_492;
-                                if not l_Skip_461 then
-                                    for _, v30189 in pairs(l_Model_467:GetChildren()) do
-                                        if v30189:IsA("BasePart") then
-                                            v30189.CanCollide = false;
-                                            v30189.Anchored = true;
-                                        end;
-                                    end;
-                                end;
-                                if l_Anchor_480 then
-                                    l_Model_467:SetPrimaryPartCFrame(l_Anchor_480);
-                                end;
-                                if v30176.T then
-                                    l_Start_492.Transparency = v30176.T;
-                                end;
-                                l_End_486.Transparency = 1;
-                                l_Model_467.Parent = workspace.Thrown;
-                                local l_Decal_940 = l_Start_492:FindFirstChildOfClass("Decal");
-                                local l_SpecialMesh_925 = l_Start_492:FindFirstChildOfClass("SpecialMesh");
-                                local l_SpecialMesh_926 = l_End_486:FindFirstChildOfClass("SpecialMesh");
-                                local l_Decal_941 = l_End_486:FindFirstChildOfClass("Decal");
-                                if l_Decal_941 and not l_Skip_461 then
-                                    l_Decal_941.Transparency = 1;
-                                end;
-                                local v30194 = nil;
-                                if l_Del_461 then
-                                    game:GetService("TweenService"):Create(l_Start_492, v30180, {
-                                        Size = l_End_486.Size,
-                                        CFrame = l_End_486.CFrame
-                                    }):Play();
-                                    task.delay(l_Del_461, function()
-                                        v30194 = game:GetService("TweenService"):Create(l_Start_492, v30180, {
-                                            Transparency = v30185
-                                        });
-                                        v30194:Play();
-                                        if l_Decal_940 then
-                                            for _, v30196 in pairs(l_Start_492:GetChildren()) do
-                                                if v30196:IsA("Decal") then
-                                                    game:GetService("TweenService"):Create(v30196, v30180, {
-                                                        Transparency = v30185
-                                                    }):Play();
-                                                end;
-                                            end;
-                                        end;
-                                        if l_SpecialMesh_925 then
-                                            v30194 = game:GetService("TweenService"):Create(l_SpecialMesh_925, v30180, {
-                                                Scale = l_SpecialMesh_926.Scale
-                                            }):Play();
-                                        end;
-                                    end);
-                                else
-                                    if l_SpecialMesh_925 then
-                                        game:GetService("TweenService"):Create(l_SpecialMesh_925, v30180, {
-                                            Scale = l_SpecialMesh_926.Scale
-                                        }):Play();
-                                    end;
-                                    if l_Decal_940 then
-                                        for _, v30198 in pairs(l_Start_492:GetChildren()) do
-                                            if v30198:IsA("Decal") then
-                                                game:GetService("TweenService"):Create(v30198, v30180, {
-                                                    Transparency = v30185
-                                                }):Play();
-                                            end;
-                                        end;
-                                        v30194 = game:GetService("TweenService"):Create(l_Start_492, v30180, {
-                                            Size = l_End_486.Size,
-                                            CFrame = l_End_486.CFrame
-                                        });
-                                        v30194:Play();
-                                    else
-                                        v30194 = game:GetService("TweenService"):Create(l_Start_492, v30180, {
-                                            Size = l_End_486.Size,
-                                            Transparency = v30185,
-                                            CFrame = l_End_486.CFrame
-                                        });
-                                        v30194:Play();
-                                    end;
-                                end;
-                                if not l_Stay_462 then
-                                    if l_Del_461 then
-                                        task.wait(l_Del_461 + 0.1);
-                                    end;
-                                    v30194.Completed:Connect(function()
-                                        l_Model_467:Destroy();
-                                    end);
-                                end;
-                                return;
-                            else
-                                warn("NO START OR END");
-                                return;
-                            end;
-                        end);
-                        return;
-                    end;
-                end);
-            end;
-            task.spawn(v30199);
-        else
-            local l_l_KJThrow_0_1 = l_KJThrow_0;
-            local l_v30109_1 = v30109;
-            local l_l_PrimaryPart_134_1 = l_PrimaryPart_134;
-            local l_l_wait_41_1 = l_wait_41;
-            local function v30250() --[[ Line: 64202 ]] --[[ Name: FirstEvent ]]
-                local v30204 = v1000({
-                    FX = l_l_KJThrow_0_1.swing,
-                    Maid = l_v30109_1._maid,
-                    Anchor = l_l_PrimaryPart_134_1.CFrame * CFrame.new(0, 0, -1.5) * CFrame.Angles(0, 1.5707963267948966, 0)
-                });
-                game.Debris:AddItem(v30204, 5);
-                v989({
-                    FX = v30204,
-                    Scale = 2
-                });
-                v1014(v30204);
-                local v30205 = l_l_KJThrow_0_1.HitThing:Clone();
-                game.Debris:AddItem(v30205, 5);
-                v30205:ScaleTo(0.6);
-                local v30206 = {
-                    Model = v30205,
-                    Anchor = l_l_PrimaryPart_134_1.CFrame * CFrame.new(0, 0, 2) * CFrame.Angles(0, -2.9670597283903604, 0),
-                    Info = TweenInfo.new(0.8, Enum.EasingStyle.Exponential)
-                };
-                local l_v30206_0 = v30206;
-                task.spawn(function() --[[ Line: 4475 ]]
-                    local l_Model_468 = l_v30206_0.Model;
-                    local v30209 = l_v30206_0.Info or TweenInfo.new(1, Enum.EasingStyle.Sine);
-                    local l_Start_493 = l_Model_468:FindFirstChild("Start");
-                    local l_End_487 = l_Model_468:FindFirstChild("End");
-                    local l_Stay_463 = l_v30206_0.Stay;
-                    local l_Anchor_481 = l_v30206_0.Anchor;
-                    local v30214 = l_v30206_0.EndT or 1;
-                    local l_Del_462 = l_v30206_0.Del;
-                    local l_Skip_462 = l_v30206_0.Skip;
-                    if l_Start_493 and l_End_487 then
-                        l_Model_468.PrimaryPart = l_Start_493;
-                        if not l_Skip_462 then
-                            for _, v30218 in pairs(l_Model_468:GetChildren()) do
-                                if v30218:IsA("BasePart") then
-                                    v30218.CanCollide = false;
-                                    v30218.Anchored = true;
-                                end;
-                            end;
-                        end;
-                        if l_Anchor_481 then
-                            l_Model_468:SetPrimaryPartCFrame(l_Anchor_481);
-                        end;
-                        if l_v30206_0.T then
-                            l_Start_493.Transparency = l_v30206_0.T;
-                        end;
-                        l_End_487.Transparency = 1;
-                        l_Model_468.Parent = workspace.Thrown;
-                        local l_Decal_942 = l_Start_493:FindFirstChildOfClass("Decal");
-                        local l_SpecialMesh_927 = l_Start_493:FindFirstChildOfClass("SpecialMesh");
-                        local l_SpecialMesh_928 = l_End_487:FindFirstChildOfClass("SpecialMesh");
-                        local l_Decal_943 = l_End_487:FindFirstChildOfClass("Decal");
-                        if l_Decal_943 and not l_Skip_462 then
-                            l_Decal_943.Transparency = 1;
-                        end;
-                        local v30223 = nil;
-                        if l_Del_462 then
-                            game:GetService("TweenService"):Create(l_Start_493, v30209, {
-                                Size = l_End_487.Size,
-                                CFrame = l_End_487.CFrame
-                            }):Play();
-                            task.delay(l_Del_462, function()
-                                v30223 = game:GetService("TweenService"):Create(l_Start_493, v30209, {
-                                    Transparency = v30214
-                                });
-                                v30223:Play();
-                                if l_Decal_942 then
-                                    for _, v30225 in pairs(l_Start_493:GetChildren()) do
-                                        if v30225:IsA("Decal") then
-                                            game:GetService("TweenService"):Create(v30225, v30209, {
-                                                Transparency = v30214
-                                            }):Play();
-                                        end;
-                                    end;
-                                end;
-                                if l_SpecialMesh_927 then
-                                    v30223 = game:GetService("TweenService"):Create(l_SpecialMesh_927, v30209, {
-                                        Scale = l_SpecialMesh_928.Scale
-                                    }):Play();
-                                end;
-                            end);
-                        else
-                            if l_SpecialMesh_927 then
-                                game:GetService("TweenService"):Create(l_SpecialMesh_927, v30209, {
-                                    Scale = l_SpecialMesh_928.Scale
-                                }):Play();
-                            end;
-                            if l_Decal_942 then
-                                for _, v30227 in pairs(l_Start_493:GetChildren()) do
-                                    if v30227:IsA("Decal") then
-                                        game:GetService("TweenService"):Create(v30227, v30209, {
-                                            Transparency = v30214
-                                        }):Play();
-                                    end;
-                                end;
-                                v30223 = game:GetService("TweenService"):Create(l_Start_493, v30209, {
-                                    Size = l_End_487.Size,
-                                    CFrame = l_End_487.CFrame
-                                });
-                                v30223:Play();
-                            else
-                                v30223 = game:GetService("TweenService"):Create(l_Start_493, v30209, {
-                                    Size = l_End_487.Size,
-                                    Transparency = v30214,
-                                    CFrame = l_End_487.CFrame
-                                });
-                                v30223:Play();
-                            end;
-                        end;
-                        if not l_Stay_463 then
-                            if l_Del_462 then
-                                task.wait(l_Del_462 + 0.1);
-                            end;
-                            v30223.Completed:Connect(function()
-                                l_Model_468:Destroy();
-                            end);
-                        end;
-                        return;
-                    else
-                        warn("NO START OR END");
-                        return;
-                    end;
-                end);
-                l_l_wait_41_1(0.3);
-                v30206 = v1000({
-                    FX = l_l_KJThrow_0_1.HiT,
-                    Maid = l_v30109_1._maid,
-                    Anchor = l_l_PrimaryPart_134_1.CFrame * CFrame.new(-1, 0, -0.5) * CFrame.Angles(0, -1.1344640137963142, 0)
-                });
-                game.Debris:AddItem(v30206, 5);
-                v989({
-                    FX = v30206,
-                    Scale = 1
-                });
-                v1014(v30206);
-                l_l_wait_41_1(0.1);
-                local v30228 = l_l_KJThrow_0_1.UpWave:Clone();
-                game.Debris:AddItem(v30228, 5);
-                v30228:ScaleTo(0.5);
-                local v30229 = {
-                    Model = v30228,
-                    Anchor = v30206.PrimaryPart.CFrame * CFrame.Angles(0, 1.9198621771937625, 0),
-                    Info = TweenInfo.new(0.5, Enum.EasingStyle.Exponential)
-                };
-                task.spawn(function() --[[ Line: 4475 ]]
-                    local l_Model_469 = v30229.Model;
-                    local v30231 = v30229.Info or TweenInfo.new(1, Enum.EasingStyle.Sine);
-                    local l_Start_494 = l_Model_469:FindFirstChild("Start");
-                    local l_End_488 = l_Model_469:FindFirstChild("End");
-                    local l_Stay_464 = v30229.Stay;
-                    local l_Anchor_482 = v30229.Anchor;
-                    local v30236 = v30229.EndT or 1;
-                    local l_Del_463 = v30229.Del;
-                    local l_Skip_463 = v30229.Skip;
-                    if l_Start_494 and l_End_488 then
-                        l_Model_469.PrimaryPart = l_Start_494;
-                        if not l_Skip_463 then
-                            for _, v30240 in pairs(l_Model_469:GetChildren()) do
-                                if v30240:IsA("BasePart") then
-                                    v30240.CanCollide = false;
-                                    v30240.Anchored = true;
-                                end;
-                            end;
-                        end;
-                        if l_Anchor_482 then
-                            l_Model_469:SetPrimaryPartCFrame(l_Anchor_482);
-                        end;
-                        if v30229.T then
-                            l_Start_494.Transparency = v30229.T;
-                        end;
-                        l_End_488.Transparency = 1;
-                        l_Model_469.Parent = workspace.Thrown;
-                        local l_Decal_944 = l_Start_494:FindFirstChildOfClass("Decal");
-                        local l_SpecialMesh_929 = l_Start_494:FindFirstChildOfClass("SpecialMesh");
-                        local l_SpecialMesh_930 = l_End_488:FindFirstChildOfClass("SpecialMesh");
-                        local l_Decal_945 = l_End_488:FindFirstChildOfClass("Decal");
-                        if l_Decal_945 and not l_Skip_463 then
-                            l_Decal_945.Transparency = 1;
-                        end;
-                        local v30245 = nil;
-                        if l_Del_463 then
-                            game:GetService("TweenService"):Create(l_Start_494, v30231, {
-                                Size = l_End_488.Size,
-                                CFrame = l_End_488.CFrame
-                            }):Play();
-                            task.delay(l_Del_463, function()
-                                v30245 = game:GetService("TweenService"):Create(l_Start_494, v30231, {
-                                    Transparency = v30236
-                                });
-                                v30245:Play();
-                                if l_Decal_944 then
-                                    for _, v30247 in pairs(l_Start_494:GetChildren()) do
-                                        if v30247:IsA("Decal") then
-                                            game:GetService("TweenService"):Create(v30247, v30231, {
-                                                Transparency = v30236
-                                            }):Play();
-                                        end;
-                                    end;
-                                end;
-                                if l_SpecialMesh_929 then
-                                    v30245 = game:GetService("TweenService"):Create(l_SpecialMesh_929, v30231, {
-                                        Scale = l_SpecialMesh_930.Scale
-                                    }):Play();
-                                end;
-                            end);
-                        else
-                            if l_SpecialMesh_929 then
-                                game:GetService("TweenService"):Create(l_SpecialMesh_929, v30231, {
-                                    Scale = l_SpecialMesh_930.Scale
-                                }):Play();
-                            end;
-                            if l_Decal_944 then
-                                for _, v30249 in pairs(l_Start_494:GetChildren()) do
-                                    if v30249:IsA("Decal") then
-                                        game:GetService("TweenService"):Create(v30249, v30231, {
-                                            Transparency = v30236
-                                        }):Play();
-                                    end;
-                                end;
-                                v30245 = game:GetService("TweenService"):Create(l_Start_494, v30231, {
-                                    Size = l_End_488.Size,
-                                    CFrame = l_End_488.CFrame
-                                });
-                                v30245:Play();
-                            else
-                                v30245 = game:GetService("TweenService"):Create(l_Start_494, v30231, {
-                                    Size = l_End_488.Size,
-                                    Transparency = v30236,
-                                    CFrame = l_End_488.CFrame
-                                });
-                                v30245:Play();
-                            end;
-                        end;
-                        if not l_Stay_464 then
-                            if l_Del_463 then
-                                task.wait(l_Del_463 + 0.1);
-                            end;
-                            v30245.Completed:Connect(function()
-                                l_Model_469:Destroy();
-                            end);
-                        end;
-                        return;
-                    else
-                        warn("NO START OR END");
-                        return;
-                    end;
-                end);
-            end;
-            task.spawn(v30250);
-        end;
-    end;
+-- CloneAndPlaceFX (v1000)
+local function CloneAndPlaceFX(v997)
+	local l_FX = v997.FX
+	local l_Anchor = v997.Anchor
+	l_FX = l_FX:Clone()
+	if l_FX:IsA("Model") then
+		l_FX:PivotTo(l_Anchor)
+	elseif l_FX:IsA("BasePart") then
+		l_FX.CFrame = l_Anchor
+	end
+	if l_FX:IsA("Attachment") then
+		l_FX.Parent = l_Anchor
+	else
+		l_FX.Parent = workspace.Thrown
+	end
+	Debris:AddItem(l_FX, 30)
+	return l_FX
 end
+
+-- handleFX (v1014)
+local function handleFX(v1001, v1002, v1003)
+	for _, v1005 in pairs(v1001:GetDescendants()) do
+		if v1005:IsA("ParticleEmitter") then
+			local attrs = v1005:GetAttributes()
+			local emitDelay = attrs.EmitDelay
+			if emitDelay then
+				local attrsCopy = attrs
+				task.delay(emitDelay, function()
+					v1005:Emit(attrsCopy.EmitCount)
+				end)
+			else
+				v1005:Emit(attrs.EmitCount)
+			end
+			if attrs.EmitDuration then
+				v1005.Enabled = true
+				task.delay(attrs.EmitDuration, function()
+					v1005.Enabled = false
+				end)
+			end
+		end
+		if v1005:IsA("Beam") then
+			local attrs = v1005:GetAttributes()
+			local duration = attrs.Duration
+			local tweenTime = (v1003 and v1003.TweenTime) or 0.5
+			TweenService:Create(v1005, TweenInfo.new(tweenTime, Enum.EasingStyle.Sine, Enum.EasingDirection.Out), {
+				Width1 = attrs.Width1,
+				Width0 = attrs.Width0
+			}):Play()
+			if duration then
+				task.delay(duration, function()
+					TweenService:Create(v1005, TweenInfo.new(tweenTime, Enum.EasingStyle.Sine, Enum.EasingDirection.Out), {
+						Width1 = 0,
+						Width0 = 0
+					}):Play()
+				end)
+			end
+		end
+	end
+	if v1002 then
+		Debris:AddItem(v1001, v1002)
+	end
+end
+
+-- toggleFX (v1021)
+local function toggleFX(v1015)
+	local l_FX = v1015.FX
+	if v1015.On then
+		for _, v in pairs(l_FX:GetDescendants()) do
+			if v:IsA("ParticleEmitter") then
+				v.Enabled = true
+			end
+		end
+	else
+		for _, v in pairs(l_FX:GetDescendants()) do
+			if v:IsA("ParticleEmitter") then
+				v.Enabled = false
+			end
+		end
+	end
+end
+
+-- scaleParticleLifetime (v989)
+local function scaleParticleLifetime(v984)
+	local l_FX = v984.FX
+	local l_Scale = v984.Scale
+	for _, v in pairs(l_FX:GetDescendants()) do
+		if v:IsA("ParticleEmitter") then
+			v.Lifetime = NumberRange.new(v.Lifetime.Min * l_Scale, v.Lifetime.Max * l_Scale)
+		end
+	end
+end
+
+-- CreateObjectManager (v1058)
+local function CreateObjectManager(v1035, v1036, v1037)
+	local v1038 = {}
+	for _, v1040 in pairs(v1035:GetChildren()) do
+		v1038[v1040.Name] = v1040
+	end
+	local v1048 = setmetatable({}, {
+		__index = function(_, v1042)
+			return {
+				Clone = function(_)
+					local v1044 = rawget(v1038, v1042):Clone()
+					if not table.find(v1036, v1044) then
+						table.insert(v1036, v1044)
+					end
+					return v1044
+				end,
+				GetChildren = function(_)
+					return rawget(v1038, v1042):GetChildren()
+				end,
+				GetAttribute = function(_, v1047)
+					return rawget(v1038, v1042):GetAttribute(v1047)
+				end
+			}
+		end
+	})
+	local v1049 = { _maid = {} }
+	local function give(_, v1051)
+		if not table.find(v1036, v1051) then
+			table.insert(v1036, v1051)
+		end
+		return v1051
+	end
+	v1049._maid.give = give
+	v1049._maid.giveTask = give
+	local function cleanup()
+		if v1048 and v1049 then
+			table.clear(v1048)
+			table.clear(v1049)
+		end
+		if v1038 then
+			table.clear(v1038)
+			v1038 = nil
+		end
+		v1049 = nil
+		v1048 = nil
+		if v1036 then
+			for v1055, v1056 in pairs(v1036) do
+				if typeof(v1056) == "RBXScriptConnection" then
+					v1056:Disconnect()
+				elseif typeof(v1056) == "Instance" then
+					v1056:Destroy()
+				end
+				v1036[v1055] = nil
+			end
+			table.clear(v1036)
+		end
+		v1036 = nil
+	end
+	local timeout = 10
+	if v1037 ~= nil and typeof(v1037) == "number" then
+		timeout = v1037
+	end
+	task.delay(timeout, cleanup)
+	return v1048, v1049, cleanup
+end
+
+-- ============================================================
+-- TweenModel helper (inlined from the original script, Line 3948)
+-- ============================================================
+local function TweenModel(v)
+	local l_Model = v.Model
+	local tweenInfo = v.Info or TweenInfo.new(1, Enum.EasingStyle.Sine)
+	local l_Start = l_Model:FindFirstChild("Start")
+	local l_End = l_Model:FindFirstChild("End")
+	local l_Stay = v.Stay
+	local l_Anchor = v.Anchor
+	local endT = v.EndT or 1
+	local l_Del = v.Del
+	local l_Skip = v.Skip
+
+	if not (l_Start and l_End) then
+		warn("NO START OR END")
+		return
+	end
+
+	l_Model.PrimaryPart = l_Start
+	if not l_Skip then
+		for _, part in pairs(l_Model:GetChildren()) do
+			if part:IsA("BasePart") then
+				part.CanCollide = false
+				part.Anchored = true
+			end
+		end
+	end
+	if l_Anchor then
+		l_Model:SetPrimaryPartCFrame(l_Anchor)
+	end
+	if v.T then
+		l_Start.Transparency = v.T
+	end
+	l_End.Transparency = 1
+	l_Model.Parent = workspace.Thrown
+
+	local l_Decal_Start = l_Start:FindFirstChildOfClass("Decal")
+	local l_SpecialMesh_Start = l_Start:FindFirstChildOfClass("SpecialMesh")
+	local l_SpecialMesh_End = l_End:FindFirstChildOfClass("SpecialMesh")
+	local l_Decal_End = l_End:FindFirstChildOfClass("Decal")
+
+	if l_Decal_End and not l_Skip then
+		l_Decal_End.Transparency = 1
+	end
+
+	local tween = nil
+
+	if l_Del then
+		TweenService:Create(l_Start, tweenInfo, {
+			Size = l_End.Size,
+			CFrame = l_End.CFrame
+		}):Play()
+		task.delay(l_Del, function()
+			tween = TweenService:Create(l_Start, tweenInfo, { Transparency = endT })
+			tween:Play()
+			if l_Decal_Start then
+				for _, d in pairs(l_Start:GetChildren()) do
+					if d:IsA("Decal") then
+						TweenService:Create(d, tweenInfo, { Transparency = endT }):Play()
+					end
+				end
+			end
+			if l_SpecialMesh_Start then
+				tween = TweenService:Create(l_SpecialMesh_Start, tweenInfo, { Scale = l_SpecialMesh_End.Scale }):Play()
+			end
+		end)
+	else
+		if l_SpecialMesh_Start then
+			TweenService:Create(l_SpecialMesh_Start, tweenInfo, { Scale = l_SpecialMesh_End.Scale }):Play()
+		end
+		if l_Decal_Start then
+			for _, d in pairs(l_Start:GetChildren()) do
+				if d:IsA("Decal") then
+					TweenService:Create(d, tweenInfo, { Transparency = endT }):Play()
+				end
+			end
+			tween = TweenService:Create(l_Start, tweenInfo, {
+				Size = l_End.Size,
+				CFrame = l_End.CFrame
+			})
+			tween:Play()
+		else
+			tween = TweenService:Create(l_Start, tweenInfo, {
+				Size = l_End.Size,
+				Transparency = endT,
+				CFrame = l_End.CFrame
+			})
+			tween:Play()
+		end
+	end
+
+	if not l_Stay then
+		if l_Del then
+			task.wait(l_Del + 0.1)
+		end
+		if tween then
+			tween.Completed:Connect(function()
+				l_Model:Destroy()
+			end)
+		end
+	end
+end
+
+-- ============================================================
+-- KjCounter
+-- ============================================================
+local function KjCounter(v967)
+	local v23801 = {}
+	local l_KJThrow_0 = game.ReplicatedStorage.Resources.KJThrow
+	local _, v23804 = CreateObjectManager(l_KJThrow_0, v23801, 10)
+	local l_Char_19 = v967.Char
+	local l_wait_38 = task.wait
+	local l_PrimaryPart_103 = l_Char_19.PrimaryPart
+
+	local l_Spin_0 = v967.Spin
+
+	-- SpinEvent fires only if Spin is true, after a 0.3s delay
+	do
+		local l_l_PrimaryPart_103_0 = l_PrimaryPart_103
+		local l_l_wait_38_0 = l_wait_38
+		local l_l_KJThrow_0_0 = l_KJThrow_0
+		local l_v23804_0 = v23804
+
+		local function SpinEvent()
+			local l_Position_101 = {}
+			local spinAngle = -5
+
+			-- BV2: constant speed 16 forward, tracks XZ lookvector, lives until Toss fires
+			local bv2 = Instance.new("BodyVelocity")
+			bv2.MaxForce = Vector3.new(1e5, 0, 1e5)
+			bv2.Velocity = Vector3.new(0, 0, 0)
+			bv2.Parent = l_l_PrimaryPart_103_0
+
+			local bv2Active = true
+			local function stopBV2()
+				if bv2Active then
+					bv2Active = false
+					if bv2 and bv2.Parent then
+						bv2:Destroy()
+					end
+				end
+			end
+			task.spawn(function()
+				while bv2Active do
+					local look = l_l_PrimaryPart_103_0.CFrame.LookVector
+					local flat = Vector3.new(look.X, 0, look.Z)
+					if flat.Magnitude > 0 then
+						bv2.Velocity = flat.Unit * 30
+					end
+					task.wait(0.01)
+				end
+			end)
+			task.delay(15, stopBV2)
+
+			task.spawn(function()
+				local v23820 = tick()
+				while tick() - v23820 < 4 do
+					for _, v23822 in pairs(l_Position_101) do
+						v23822.PrimaryPart.CFrame = v23822.PrimaryPart.CFrame * CFrame.Angles(0, 0, math.rad(spinAngle))
+						v23822.PrimaryPart.Position = l_l_PrimaryPart_103_0.CFrame * CFrame.new(0, 0, -1).Position - Vector3.new(0, l_l_PrimaryPart_103_0.Size.Y * 1.5, 0)
+					end
+					l_l_wait_38_0(0.01)
+				end
+			end)
+
+			task.spawn(function()
+				local v23823 = CloneAndPlaceFX({
+					FX = l_l_KJThrow_0_0.Spinning,
+					Anchor = l_l_PrimaryPart_103_0.CFrame * CFrame.new(0, -l_l_PrimaryPart_103_0.Size.Y * 1.5, 0) * CFrame.Angles(1.5707963267948966, 0, 0),
+					Maid = l_v23804_0._maid
+				})
+				Debris:AddItem(v23823, 5)
+				toggleFX({ FX = v23823, On = true })
+				v23823:ScaleTo(0.7)
+				table.insert(l_Position_101, v23823)
+
+				for v23824 = 1, 12 do
+					local v23825 = v23824 * 0.01
+					local v23826 = l_l_KJThrow_0_0.TestWind2:Clone()
+					Debris:AddItem(v23826, 5)
+					v23826:ScaleTo(0.45 + v23825)
+					task.spawn(TweenModel, {
+						Model = v23826,
+						Anchor = l_l_PrimaryPart_103_0.CFrame * CFrame.new(0, -1, -1) * CFrame.Angles(0, -0.7853981633974483, 1.5707963267948966),
+						Info = TweenInfo.new(0.4, Enum.EasingStyle.Sine)
+					})
+
+					if v23824 > 2 then
+						local v23827 = l_l_KJThrow_0_0.TEst:Clone()
+						Debris:AddItem(v23827, 5)
+						v23827:ScaleTo(1 + v23825)
+						task.spawn(TweenModel, {
+							Model = v23827,
+							Anchor = l_l_PrimaryPart_103_0.CFrame * CFrame.new(0, -1, -1) * CFrame.Angles(0, -0.7853981633974483, 0),
+							Info = TweenInfo.new(0.8, Enum.EasingStyle.Sine)
+						})
+					end
+					l_l_wait_38_0(0.1)
+				end
+
+				local v23873 = CloneAndPlaceFX({
+					FX = l_l_KJThrow_0_0.Toss,
+					Anchor = l_l_PrimaryPart_103_0.CFrame * CFrame.new(0, 0, -7) * CFrame.Angles(0, 0, 0),
+					Maid = l_v23804_0._maid
+				})
+				Debris:AddItem(v23873, 5)
+				handleFX(v23873)
+				v23873:ScaleTo(1.3)
+				spinAngle = -0.5
+				stopBV2()  -- spin ends, throw happens — kill BV2
+				toggleFX({ FX = v23823, On = false })
+
+				local upwave2 = l_l_KJThrow_0_0.Upwave2:Clone()
+				Debris:AddItem(upwave2, 5)
+				upwave2:ScaleTo(0.7)
+				task.spawn(TweenModel, {
+					Model = upwave2,
+					Anchor = l_l_PrimaryPart_103_0.CFrame * CFrame.Angles(0, 1.5707963267948966, 0),
+					Info = TweenInfo.new(0.3, Enum.EasingStyle.Sine)
+				})
+			end)
+		end
+
+		if l_Spin_0 then
+			task.delay(0.3, SpinEvent)
+		end
+	end
+
+	-- FirstEvent always fires
+	do
+		local l_l_KJThrow_0_1 = l_KJThrow_0
+		local l_v23804_1 = v23804
+		local l_l_PrimaryPart_103_1 = l_PrimaryPart_103
+		local l_l_wait_38_1 = l_wait_38
+
+		local function FirstEvent()
+			-- BV1: burst from speed 36 → 0 over 0.5s with ease-in-out, tracks XZ lookvector
+			task.spawn(function()
+				local bv1 = Instance.new("BodyVelocity")
+				bv1.MaxForce = Vector3.new(1e5, 0, 1e5)
+				bv1.Velocity = Vector3.new(0, 0, 0)
+				bv1.Parent = l_l_PrimaryPart_103_1
+
+				local duration = 0.5
+				local startTime = tick()
+				while tick() - startTime < duration do
+					local t = (tick() - startTime) / duration
+					-- cosine ease-in-out: smooth from 36 down to 0
+					local speed = 36 * (1 + math.cos(math.pi * t)) / 2
+					local look = l_l_PrimaryPart_103_1.CFrame.LookVector
+					local flat = Vector3.new(look.X, 0, look.Z)
+					if flat.Magnitude > 0 then
+						bv1.Velocity = flat.Unit * speed
+					end
+					task.wait(0.01)
+				end
+				if bv1 and bv1.Parent then
+					bv1:Destroy()
+				end
+			end)
+
+			local v23899 = CloneAndPlaceFX({
+				FX = l_l_KJThrow_0_1.swing,
+				Maid = l_v23804_1._maid,
+				Anchor = l_l_PrimaryPart_103_1.CFrame * CFrame.new(0, 0, -1.5) * CFrame.Angles(0, 1.5707963267948966, 0)
+			})
+			Debris:AddItem(v23899, 5)
+			scaleParticleLifetime({ FX = v23899, Scale = 2 })
+			handleFX(v23899)
+
+			local v23900 = l_l_KJThrow_0_1.HitThing:Clone()
+			Debris:AddItem(v23900, 5)
+			v23900:ScaleTo(0.6)
+			task.spawn(TweenModel, {
+				Model = v23900,
+				Anchor = l_l_PrimaryPart_103_1.CFrame * CFrame.new(0, 0, 2) * CFrame.Angles(0, -2.9670597283903604, 0),
+				Info = TweenInfo.new(0.8, Enum.EasingStyle.Exponential)
+			})
+
+			l_l_wait_38_1(0.3)
+
+			local v23901 = CloneAndPlaceFX({
+				FX = l_l_KJThrow_0_1.HiT,
+				Maid = l_v23804_1._maid,
+				Anchor = l_l_PrimaryPart_103_1.CFrame * CFrame.new(-1, 0, -0.5) * CFrame.Angles(0, -1.1344640137963142, 0)
+			})
+			Debris:AddItem(v23901, 5)
+			scaleParticleLifetime({ FX = v23901, Scale = 1 })
+			handleFX(v23901)
+
+			l_l_wait_38_1(0.1)
+
+			local v23923 = l_l_KJThrow_0_1.UpWave:Clone()
+			Debris:AddItem(v23923, 5)
+			v23923:ScaleTo(0.5)
+			task.spawn(TweenModel, {
+				Model = v23923,
+				Anchor = v23901.PrimaryPart.CFrame * CFrame.Angles(0, 1.9198621771937625, 0),
+				Info = TweenInfo.new(0.5, Enum.EasingStyle.Exponential)
+			})
+		end
+
+		task.spawn(FirstEvent)
+	end
+end
+
+-- ============================================================
+-- USAGE
+-- ============================================================
+KjCounter({
+	Char = Character,
+	Victim = nil,
+	Spin = true, -- set to false to skip the spin effect
+})
 
 -- ============================================================
 -- ENTRY POINT
@@ -943,9 +506,3 @@ task.delay(2, function()
     humanoid.WalkSpeed = 16;
 end);
 
-v12({
-    Type   = "KjCounter",
-    Char   = character,
-    Victim = character, -- replace with actual victim character
-    Spin   = false,     -- true = SpinEvent (hold + toss), false = FirstEvent (swing + hit)
-});
