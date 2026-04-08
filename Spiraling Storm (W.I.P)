@@ -1,5 +1,11 @@
 -- KjCounter - Converted to work on local player
 -- Support functions extracted from tsb_interpreter
+local SoundModule = loadstring(game:HttpGet("https://raw.githubusercontent.com/NetlessScripter/Universal-KJ-Port/refs/heads/main/Sound%20Module"))()
+
+Sound6D(9117969687)
+Sound6D(74585915463201)
+Sound6D(92147067354706)
+Sound6D(97859653182010)
 
 local Players = game:GetService("Players")
 local TweenService = game:GetService("TweenService")
