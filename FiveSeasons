@@ -1233,6 +1233,16 @@ local function v12(data)
     end
 end
 
+local Players = game:GetService("Players")
+local Player = Players.LocalPlayer
+local Character = Player.Character or Player.CharacterAdded:Wait()
+local Humanoid = Character:WaitForChild("Humanoid")
+
+if not getgenv().Animator6DLoadedPro then
+    loadstring(game:HttpGet("https://raw.githubusercontent.com/NetlessScripter/Universal-KJ-Port/refs/heads/main/Animation%20Module"))()
+end
+
+getgenv().Animator6D(112724034457628, 1, false)
 -------------------------------------------------------------------------------
 -- EXAMPLE CALLS
 -------------------------------------------------------------------------------
@@ -1245,3 +1255,4 @@ task.wait(8) -- matches original timing before camera phase
 v12({ Effect = "Five Season Camera", Char = char })
 
 v12({ Effect = "Five Season Atk", Char = char })
+getgenv().Animator6D(104289895398306, 1, false)
