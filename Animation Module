@@ -400,13 +400,18 @@ local EDIdByName = { In=0, Out=1, InOut=2 }
 
 local function deserializeFrames(data)
     local frames = {}
+    -- Local refs so the closure can never see a nil upvalue
+    local esLookup = ESIdByName
+    local edLookup = EDIdByName
     for i, f in ipairs(data.Frames) do
         local poses = {}
         for joint, p in pairs(f.Poses) do
+            local es = p.EasingStyle
+            local ed = p.EasingDirection
             poses[joint] = {
                 CFrame          = CFrame.new(table.unpack(p.CFrame)),
-                EasingStyle     = ESIdByName[p.EasingStyle]     or 0,
-                EasingDirection = EDIdByName[p.EasingDirection] or 1,
+                EasingStyle     = (esLookup and esLookup[es]) or 0,
+                EasingDirection = (edLookup and edLookup[ed]) or 1,
             }
         end
         frames[i] = { Time = f.Time, Poses = poses }
@@ -417,6 +422,7 @@ end
 local function writeAnimCache(id, frames, looped)
     if not writefile then return end
     local ok, encoded = pcall(HttpService.JSONEncode, HttpService, {
+        Version      = CACHE_VERSION,
         ID           = id,
         KeyframeData = serializeFrames(frames, looped),
     })
@@ -424,6 +430,8 @@ local function writeAnimCache(id, frames, looped)
         pcall(writefile, getCacheFilename(id), encoded)
     end
 end
+
+local CACHE_VERSION = 2  -- bump this whenever the serialization format changes
 
 local function readAnimCache(id)
     if not readfile or not isfile then return nil, nil end
@@ -433,6 +441,11 @@ local function readAnimCache(id)
     if not ok or not raw or raw == "" then return nil, nil end
     local ok2, data = pcall(HttpService.JSONDecode, HttpService, raw)
     if not ok2 or not data then return nil, nil end
+    -- Reject cache files written by older versions of the module
+    if (data.Version or 1) < CACHE_VERSION then
+        pcall(delfile or function() end, filename)
+        return nil, nil
+    end
     if tostring(data.ID) ~= tostring(id) then return nil, nil end
     if not data.KeyframeData or not data.KeyframeData.Frames then return nil, nil end
     return deserializeFrames(data.KeyframeData)
