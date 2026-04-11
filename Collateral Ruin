@@ -348,7 +348,7 @@ humanoid.WalkSpeed = 0;
 getgenv().Animator6D(17325254223, 1, false);
 
 task.delay(3, function()
-    humanoid.WalkSpeed = 16;
+    humanoid.WalkSpeed = 25;
 end);
 
 -- Step 1: fire windup phase immediately
