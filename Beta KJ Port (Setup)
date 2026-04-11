@@ -423,3 +423,231 @@ end;
 l_UltButton_0.MouseButton1Click:Connect(function()
     activateUlt();
 end);
+
+
+
+local l_Lighting_0 = game:GetService("Lighting")
+local l_Terrain_0 = workspace.Terrain
+
+local l_Deletable_0 = {
+    "Atmosphere",
+    "BloomEffect",
+    "BlurEffect",
+    "ColorCorrectionEffect",
+    "DepthOfFieldEffect",
+    "SunRaysEffect",
+    "Sky",
+}
+for _, v_child in ipairs(l_Lighting_0:GetChildren()) do
+    for _, v_cls in ipairs(l_Deletable_0) do
+        if v_child.ClassName == v_cls then
+            v_child:Destroy()
+            break
+        end
+    end
+end
+
+l_Lighting_0.Ambient = Color3.fromRGB(138, 138, 138)
+l_Lighting_0.Brightness = 2
+l_Lighting_0.ClockTime = 8.233055114746094
+l_Lighting_0.ColorShift_Bottom = Color3.fromRGB(0, 0, 0)
+l_Lighting_0.ColorShift_Top = Color3.fromRGB(0, 0, 0)
+l_Lighting_0.EnvironmentDiffuseScale = 0
+l_Lighting_0.EnvironmentSpecularScale = 0
+l_Lighting_0.ExposureCompensation = 0.009999999776482582
+l_Lighting_0.FogColor = Color3.fromRGB(192, 192, 192)
+l_Lighting_0.FogEnd = 15000
+l_Lighting_0.FogStart = 0
+l_Lighting_0.GeographicLatitude = 19.10700035095215
+l_Lighting_0.GlobalShadows = true
+l_Lighting_0.OutdoorAmbient = Color3.fromRGB(128, 128, 128)
+l_Lighting_0.ShadowSoftness = 0.20000000298023224
+l_Lighting_0.Technology = Enum.Technology.ShadowMap
+
+l_Terrain_0.WaterColor = Color3.fromRGB(12, 84, 92)
+l_Terrain_0.WaterReflectance = 1
+l_Terrain_0.WaterTransparency = 0.30000001192092896
+l_Terrain_0.WaterWaveSize = 0.15000000596046448
+l_Terrain_0.WaterWaveSpeed = 10
+
+do
+    local l_ExistingClouds_0 = workspace.Terrain:FindFirstChildOfClass("Clouds")
+    if l_ExistingClouds_0 then l_ExistingClouds_0:Destroy() end
+    local l_Clouds_0 = Instance.new("Clouds")
+    l_Clouds_0.Name = "Clouds"
+    l_Clouds_0.Color = Color3.fromRGB(255, 255, 255)
+    l_Clouds_0.Cover = 0.6549999713897705
+    l_Clouds_0.Density = 0.2930000126361847
+    l_Clouds_0.Enabled = true
+    l_Clouds_0.Parent = workspace.Terrain
+end
+
+do
+    local l_Inst_0 = Instance.new("BlurEffect")
+    l_Inst_0.Name = "menublur"
+    l_Inst_0.Enabled = false
+    l_Inst_0.Size = 12
+    l_Inst_0.Parent = l_Lighting_0
+end
+
+do
+    local l_Inst_0 = Instance.new("BlurEffect")
+    l_Inst_0.Name = "loadblur"
+    l_Inst_0.Enabled = false
+    l_Inst_0.Size = 12
+    l_Inst_0.Parent = l_Lighting_0
+end
+
+do
+    local l_Inst_0 = Instance.new("ColorCorrectionEffect")
+    l_Inst_0.Name = "WhiteScreen"
+    l_Inst_0.Brightness = 0
+    l_Inst_0.Contrast = 0
+    l_Inst_0.Enabled = true
+    l_Inst_0.Saturation = 0
+    l_Inst_0.TintColor = Color3.fromRGB(255, 255, 255)
+    l_Inst_0.Parent = l_Lighting_0
+end
+
+do
+    local l_Inst_0 = Instance.new("ColorCorrectionEffect")
+    l_Inst_0.Name = "Timestop"
+    l_Inst_0.Brightness = 0
+    l_Inst_0.Contrast = 0
+    l_Inst_0.Enabled = false
+    l_Inst_0.Saturation = 0
+    l_Inst_0.TintColor = Color3.fromRGB(255, 255, 255)
+    l_Inst_0.Parent = l_Lighting_0
+end
+
+do
+    local l_Inst_0 = Instance.new("SunRaysEffect")
+    l_Inst_0.Name = "SunRays"
+    l_Inst_0.Enabled = true
+    l_Inst_0.Intensity = 0.009999999776482582
+    l_Inst_0.Spread = 0.10000000149011612
+    l_Inst_0.Parent = l_Lighting_0
+end
+
+do
+    local l_Inst_0 = Instance.new("DepthOfFieldEffect")
+    l_Inst_0.Name = "DepthOfField"
+    l_Inst_0.Enabled = false
+    l_Inst_0.FarIntensity = 0.10000000149011612
+    l_Inst_0.FocusDistance = 0.05000000074505806
+    l_Inst_0.InFocusRadius = 30
+    l_Inst_0.NearIntensity = 0.75
+    l_Inst_0.Parent = l_Lighting_0
+end
+
+do
+    local l_Inst_0 = Instance.new("ColorCorrectionEffect")
+    l_Inst_0.Name = "ColorCorrectionTT"
+    l_Inst_0.Brightness = 0
+    l_Inst_0.Contrast = 0
+    l_Inst_0.Enabled = true
+    l_Inst_0.Saturation = 0
+    l_Inst_0.TintColor = Color3.fromRGB(255, 255, 255)
+    l_Inst_0.Parent = l_Lighting_0
+end
+
+do
+    local l_Inst_0 = Instance.new("ColorCorrectionEffect")
+    l_Inst_0.Name = "ColorCorrectionT"
+    l_Inst_0.Brightness = 0
+    l_Inst_0.Contrast = 0
+    l_Inst_0.Enabled = true
+    l_Inst_0.Saturation = 0
+    l_Inst_0.TintColor = Color3.fromRGB(255, 255, 255)
+    l_Inst_0.Parent = l_Lighting_0
+end
+
+do
+    local l_Inst_0 = Instance.new("ColorCorrectionEffect")
+    l_Inst_0.Name = "ColorCorrectionForSlow"
+    l_Inst_0.Brightness = 0
+    l_Inst_0.Contrast = 0
+    l_Inst_0.Enabled = true
+    l_Inst_0.Saturation = 0
+    l_Inst_0.TintColor = Color3.fromRGB(255, 255, 255)
+    l_Inst_0.Parent = l_Lighting_0
+end
+
+do
+    local l_Inst_0 = Instance.new("ColorCorrectionEffect")
+    l_Inst_0.Name = "ColorCorrectionA"
+    l_Inst_0.Brightness = 0
+    l_Inst_0.Contrast = 0
+    l_Inst_0.Enabled = true
+    l_Inst_0.Saturation = 0
+    l_Inst_0.TintColor = Color3.fromRGB(255, 255, 255)
+    l_Inst_0.Parent = l_Lighting_0
+end
+
+do
+    local l_Inst_0 = Instance.new("ColorCorrectionEffect")
+    l_Inst_0.Name = "ColorCorrection"
+    l_Inst_0.Brightness = 0
+    l_Inst_0.Contrast = 0.10000000149011612
+    l_Inst_0.Enabled = true
+    l_Inst_0.Saturation = 0
+    l_Inst_0.TintColor = Color3.fromRGB(255, 255, 255)
+    l_Inst_0.Parent = l_Lighting_0
+end
+
+do
+    local l_Inst_0 = Instance.new("BlurEffect")
+    l_Inst_0.Name = "BlurVictory"
+    l_Inst_0.Enabled = true
+    l_Inst_0.Size = 0
+    l_Inst_0.Parent = l_Lighting_0
+end
+
+do
+    local l_Inst_0 = Instance.new("BlurEffect")
+    l_Inst_0.Name = "Blur"
+    l_Inst_0.Enabled = true
+    l_Inst_0.Size = 0
+    l_Inst_0.Parent = l_Lighting_0
+end
+
+do
+    local l_Inst_0 = Instance.new("ColorCorrectionEffect")
+    l_Inst_0.Name = "Absolve"
+    l_Inst_0.Brightness = 0
+    l_Inst_0.Contrast = 0
+    l_Inst_0.Enabled = false
+    l_Inst_0.Saturation = 0
+    l_Inst_0.TintColor = Color3.fromRGB(255, 255, 255)
+    l_Inst_0.Parent = l_Lighting_0
+end
+
+do
+    local l_Inst_0 = Instance.new("Sky")
+    l_Inst_0.Name = "Mountains By Crykee"
+    l_Inst_0.CelestialBodiesShown = true
+    l_Inst_0.MoonAngularSize = 11
+    l_Inst_0.MoonTextureId = "rbxasset://sky/moon.jpg"
+    l_Inst_0.SkyboxBk = "http://www.roblox.com/asset/?id=368385273"
+    l_Inst_0.SkyboxDn = "http://www.roblox.com/asset/?id=48015300"
+    l_Inst_0.SkyboxFt = "http://www.roblox.com/asset/?id=368388290"
+    l_Inst_0.SkyboxLf = "http://www.roblox.com/asset/?id=368390615"
+    l_Inst_0.SkyboxRt = "http://www.roblox.com/asset/?id=368385190"
+    l_Inst_0.SkyboxUp = "http://www.roblox.com/asset/?id=48015387"
+    l_Inst_0.StarCount = 3000
+    l_Inst_0.SunAngularSize = 8
+    l_Inst_0.SunTextureId = "rbxasset://sky/sun.jpg"
+    l_Inst_0.Parent = l_Lighting_0
+end
+
+do
+    local l_Inst_0 = Instance.new("Atmosphere")
+    l_Inst_0.Name = "Atmosphere"
+    l_Inst_0.Color = Color3.fromRGB(0, 0, 0)
+    l_Inst_0.Decay = Color3.fromRGB(0, 0, 0)
+    l_Inst_0.Density = 0.15000000596046448
+    l_Inst_0.Glare = 0
+    l_Inst_0.Haze = 0
+    l_Inst_0.Offset = 0.25
+    l_Inst_0.Parent = l_Lighting_0
+end
