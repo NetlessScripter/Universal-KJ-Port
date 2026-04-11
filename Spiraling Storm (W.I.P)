@@ -516,7 +516,7 @@ end
 -- ============================================================
 KjCounter({
 	Char = Character,
-	Victim = nil,
+	Victim = Character,
 	Spin = true, -- set to false to skip the spin effect
 })
 
