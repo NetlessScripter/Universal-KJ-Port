@@ -304,9 +304,10 @@ local function KjCounter(v967)
 			local l_Position_101 = {}
 			local spinAngle = -5
 
-			-- BV2: constant speed 16 forward, tracks XZ lookvector, lives until Toss fires
+			-- BV2: spiraling deceleration from speed 40, with side drift, lives until Toss fires
 			local bv2 = Instance.new("BodyVelocity")
-			bv2.MaxForce = Vector3.new(1e5, 0, 1e5)
+			bv2.Name = "SpiralingStormVelocity"
+			bv2.MaxForce = Vector3.new(40000, 0, 40000)
 			bv2.Velocity = Vector3.new(0, 0, 0)
 			bv2.Parent = l_l_PrimaryPart_103_0
 
@@ -320,13 +321,30 @@ local function KjCounter(v967)
 				end
 			end
 			task.spawn(function()
+				local speed   = 40
+				local side    = 100
+				local fallout = 0.9
+				local sideFO  = 0.9
+				local endSpeed = -5
+
 				while bv2Active do
-					local look = l_l_PrimaryPart_103_0.CFrame.LookVector
-					local flat = Vector3.new(look.X, 0, look.Z)
-					if flat.Magnitude > 0 then
-						bv2.Velocity = flat.Unit * 30
+					local cf    = l_l_PrimaryPart_103_0.CFrame
+					local fwd   = Vector3.new(cf.LookVector.X, 0, cf.LookVector.Z)
+					local right = Vector3.new(cf.LookVector.Z, 0, -cf.LookVector.X)
+
+					if fwd.Magnitude > 0 then
+						bv2.Velocity = fwd.Unit * speed + right.Unit * side
 					end
-					task.wait(0.01)
+
+					speed = speed * fallout
+					side  = side  * sideFO
+
+					if speed <= endSpeed then
+						stopBV2()
+						break
+					end
+
+					task.wait(0.1)
 				end
 			end)
 			task.delay(15, stopBV2)
@@ -413,26 +431,36 @@ local function KjCounter(v967)
 		local l_l_wait_38_1 = l_wait_38
 
 		local function FirstEvent()
-			-- BV1: burst from speed 36 → 0 over 0.5s with ease-in-out, tracks XZ lookvector
+			-- BV1: accelerates from speed 15 → 50 (capped) over 0.5s with spiral side drift
 			task.spawn(function()
 				local bv1 = Instance.new("BodyVelocity")
-				bv1.MaxForce = Vector3.new(1e5, 0, 1e5)
+				bv1.Name = "SpiralingStormVelocity"
+				bv1.MaxForce = Vector3.new(40000, 0, 40000)
 				bv1.Velocity = Vector3.new(0, 0, 0)
 				bv1.Parent = l_l_PrimaryPart_103_1
 
-				local duration = 0.5
+				local speed   = 15
+				local side    = 3.815
+				local fallout = 1.05
+				local limit   = 50
+
+				local duration  = 0.5
 				local startTime = tick()
+
 				while tick() - startTime < duration do
-					local t = (tick() - startTime) / duration
-					-- cosine ease-in-out: smooth from 36 down to 0
-					local speed = 36 * (1 + math.cos(math.pi * t)) / 2
-					local look = l_l_PrimaryPart_103_1.CFrame.LookVector
-					local flat = Vector3.new(look.X, 0, look.Z)
-					if flat.Magnitude > 0 then
-						bv1.Velocity = flat.Unit * speed
+					local cf    = l_l_PrimaryPart_103_1.CFrame
+					local fwd   = Vector3.new(cf.LookVector.X, 0, cf.LookVector.Z)
+					local right = Vector3.new(cf.LookVector.Z, 0, -cf.LookVector.X)
+
+					speed = math.min(speed * fallout, limit)
+
+					if fwd.Magnitude > 0 then
+						bv1.Velocity = fwd.Unit * speed + right.Unit * side
 					end
+
 					task.wait(0.01)
 				end
+
 				if bv1 and bv1.Parent then
 					bv1:Destroy()
 				end
@@ -509,6 +537,5 @@ humanoid.WalkSpeed = 0;
 getgenv().Animator6D(136074325508428, 1, false);
 
 task.delay(2, function()
-    humanoid.WalkSpeed = 16;
+    humanoid.WalkSpeed = 25;
 end);
-
