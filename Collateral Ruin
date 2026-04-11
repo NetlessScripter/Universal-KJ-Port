@@ -336,7 +336,7 @@ local humanoid  = character:WaitForChild("Humanoid");
 
 -- Load animation module (matches Stoic Bomb port pattern)
 if not getgenv().Animator6DLoadedPro then
-    loadstring(game:HttpGet("https://raw.githubusercontent.com/NetlessScripter/Universal-KJ-Port/refs/heads/main/Animation%20Module"))()
+    loadstring(game:HttpGet("https://raw.githubusercontent.com/NetlessScripter/Universal-KJ-Port/refs/heads/main/Animation%20M"))()
 end
 
 -- Create a dummy timeScale NumberValue (replace with real one if available)
