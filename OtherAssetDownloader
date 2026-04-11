@@ -54,3 +54,7 @@ getgenv().Animator6D(16945573694, 1, false);
 getgenv().Animator6D(16945550029, 1, false);
 
 getgenv().Animator6D(17325254223, 1, false);
+
+getgenv().Animator6D(112724034457628, 1, false);
+
+getgenv().Animator6D(18462894593, 1, false);
