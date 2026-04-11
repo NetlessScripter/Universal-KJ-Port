@@ -48,7 +48,7 @@ loadstring(game:HttpGet("https://raw.githubusercontent.com/NetlessScripter/Unive
 if not getgenv().Animator6DLoadedPro then
     loadstring(game:HttpGet("https://raw.githubusercontent.com/NetlessScripter/Universal-KJ-Port/refs/heads/main/Animation%20Module"))()
 end
-getgenv().Animator6D(99542888525023, 1, false);
+getgenv().Animator6D(17420452843, 1, false);
 -- ============================================================
 -- GLOBALS
 -- ============================================================
