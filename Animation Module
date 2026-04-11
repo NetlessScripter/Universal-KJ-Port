@@ -393,16 +393,6 @@ local function serializeFrames(frames, looped)
     return out
 end
 
-local function safeEasingStyle(name)
-    local ok, v = pcall(function() return Enum.EasingStyle[name] end)
-    return (ok and v) or Enum.EasingStyle.Linear
-end
-
-local function safeEasingDirection(name)
-    local ok, v = pcall(function() return Enum.EasingDirection[name] end)
-    return (ok and v) or Enum.EasingDirection.Out
-end
-
 local function deserializeFrames(data)
     local frames = {}
     for i, f in ipairs(data.Frames) do
@@ -410,8 +400,8 @@ local function deserializeFrames(data)
         for joint, p in pairs(f.Poses) do
             poses[joint] = {
                 CFrame          = CFrame.new(table.unpack(p.CFrame)),
-                EasingStyle     = safeEasingStyle(p.EasingStyle),
-                EasingDirection = safeEasingDirection(p.EasingDirection),
+                EasingStyle     = Enum.EasingStyle[p.EasingStyle]         or Enum.EasingStyle.Linear,
+                EasingDirection = Enum.EasingDirection[p.EasingDirection] or Enum.EasingDirection.Out,
             }
         end
         frames[i] = { Time = f.Time, Poses = poses }
