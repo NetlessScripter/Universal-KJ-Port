@@ -393,6 +393,11 @@ local function serializeFrames(frames, looped)
     return out
 end
 
+-- Name → integer maps used by the disk-cache deserialization path.
+-- Must be defined before deserializeFrames.
+local ESIdByName = { Linear=0, Sine=1, Quad=2, Cubic=3, Bounce=4, Back=5, Elastic=6 }
+local EDIdByName = { In=0, Out=1, InOut=2 }
+
 local function deserializeFrames(data)
     local frames = {}
     for i, f in ipairs(data.Frames) do
@@ -511,10 +516,6 @@ do
     local dl = { Enum.EasingDirection.In, Enum.EasingDirection.Out, Enum.EasingDirection.InOut }
     for i, d in ipairs(dl) do EDId[d] = i - 1 end
 end
--- Name → integer for the disk-cache deserialization path
-local ESIdByName = { Linear=0, Sine=1, Quad=2, Cubic=3, Bounce=4, Back=5, Elastic=6 }
-local EDIdByName = { In=0, Out=1, InOut=2 }
-
 -- ─────────────────────────────────────────────
 --  Easing  (style / direction are now integers)
 --  Linear (0) is short-circuited at the call site — never enters here.
