@@ -159,6 +159,12 @@ local player    = game.Players.LocalPlayer
 local character = player.Character or player.CharacterAdded:Wait()
 local hrp       = character:WaitForChild("HumanoidRootPart")
 
+-- ── Attacker offset (applied the moment the hitbox fires) ────────────────────
+--   Positive UP   = move caster upward  (studs)
+--   Positive BACK = move caster backward, away from the target (studs)
+local ATTACKER_OFFSET_UP   = 0   -- studs upward
+local ATTACKER_OFFSET_BACK = -3  -- studs backward
+
 -- Bind folder: sub-effects poll this; destroy it to abort the sequence early
 local bind = Instance.new("Folder")
 bind.Name  = "DropkickBind"
@@ -183,6 +189,7 @@ end)
 -- Auto-cleanup after the full sequence (~15s)
 task.delay(15, function()
     hrp.Anchored = false
+    pcall(function() if targetHRPRef then targetHRPRef.Anchored = false end end)
     camConn:Disconnect()
     pcall(function() cameraPart:Destroy() end)
     if bind.Parent then bind:Destroy() end
@@ -737,6 +744,8 @@ end
 -- ============================================================
 -- HITBOX
 -- ============================================================
+local targetHRPRef = nil   -- set on hit so the cleanup can unanchor the target
+
 task.delay(1.79, function()
     local hitbox = Instance.new("Part")
     hitbox.Name        = "DropkickHitbox"
@@ -772,6 +781,8 @@ task.delay(1.79, function()
         local targetHRP = targetChar:FindFirstChild("HumanoidRootPart")
         if targetHRP then
             targetHRP.CFrame = v1090.ogrootcfr * CFrame.new(0, 0, -5) * CFrame.Angles(0, math.pi, 0)
+            targetHRP.Anchored = true   -- prevent gravity sinking them during the sequence
+            targetHRPRef = targetHRP    -- expose to outer cleanup
         end
 
         -- Disable collision on every part of both characters
@@ -787,6 +798,12 @@ task.delay(1.79, function()
 
         -- Anchor us for the sequence duration
         hrp.Anchored = true
+
+        -- Apply attacker offset: move the WHOLE character and sync ogrootcfr so
+        -- fireDropkick's PivotTo(ogrootcfr) doesn't snap us back to the ground
+        local attackerOffsetCFrame = hrp.CFrame * CFrame.new(0, ATTACKER_OFFSET_UP, ATTACKER_OFFSET_BACK)
+        character:PivotTo(attackerOffsetCFrame)
+        v1090.ogrootcfr = attackerOffsetCFrame
 
         -- Play hit animation on the target using Animator6D
         getgenv().Animator6D(113199002278564, 1, false, targetChar)
