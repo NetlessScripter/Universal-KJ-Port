@@ -162,8 +162,8 @@ local hrp       = character:WaitForChild("HumanoidRootPart")
 -- ── Attacker offset (applied the moment the hitbox fires) ────────────────────
 --   Positive UP   = move caster upward  (studs)
 --   Positive BACK = move caster backward, away from the target (studs)
-local ATTACKER_OFFSET_UP   = 3   -- studs upward
-local ATTACKER_OFFSET_BACK = -20  -- studs backward
+local ATTACKER_OFFSET_UP   = 0   -- studs upward
+local ATTACKER_OFFSET_BACK = -3  -- studs backward
 
 -- Bind folder: sub-effects poll this; destroy it to abort the sequence early
 local bind = Instance.new("Folder")
@@ -186,8 +186,8 @@ local camConn = game:GetService("RunService").RenderStepped:Connect(function()
     end
 end)
 
--- Auto-cleanup after the full sequence (~15s)
-task.delay(15, function()
+-- Auto-cleanup after the full sequence (~20s)
+task.delay(20, function()
     hrp.Anchored = false
     pcall(function() if targetHRPRef then targetHRPRef.Anchored = false end end)
     camConn:Disconnect()
@@ -295,10 +295,10 @@ do
         end
     end)
 
-    -- Pivot caster to stored origin
-    l_char_17:PivotTo(v1090.ogrootcfr)
+    -- Capture pivot from current position (no PivotTo — attacker stays wherever they are)
     local l_l_char_17_Pivot_0   = l_char_17:GetPivot()
-    local l_Torso_8              = l_hit_12:FindFirstChild("Torso")
+    -- R6 uses "Torso", R15 uses "UpperTorso" — fall back so Position lookups don't nil-error
+    local l_Torso_8              = l_hit_12:FindFirstChild("Torso") or l_hit_12:FindFirstChild("UpperTorso")
     local l_HumanoidRootPart_4   = l_hit_12:FindFirstChild("HumanoidRootPart")
 
     -- ── Speedlines ────────────────────────────────────────────
@@ -720,10 +720,12 @@ do
                             v4023.Position    = UDim2.new(0, 0, 0, 0)
                             v4023.Size        = UDim2.new(0, 1, 0, 1)
                         end
-                        local v4024 = l_l_v3905_0_0["Frame" .. v4021]
-                        v4024.AnchorPoint = Vector2.new(0.5, 0.5)
-                        v4024.Position    = UDim2.new(0.5, 0, 0.5, 0)
-                        v4024.Size        = UDim2.new(1, 0, 1, 0)
+                        local v4024 = l_l_v3905_0_0:FindFirstChild("Frame" .. v4021)
+                        if v4024 then
+                            v4024.AnchorPoint = Vector2.new(0.5, 0.5)
+                            v4024.Position    = UDim2.new(0.5, 0, 0.5, 0)
+                            v4024.Size        = UDim2.new(1, 0, 1, 0)
+                        end
                         v4008(0.02)
                     end
                 end)
@@ -733,7 +735,7 @@ do
             if not l_l_bind_1_2 or not l_l_bind_1_2.Parent then return end
             l_v3904_0 = l_v3899_0["202020BACKSCREEN"]:Clone()
             game.Debris:AddItem(l_v3904_0, 9)
-            l_v3904_0.CFrame  = l_l_l_char_17_Pivot_0_1 * CFrame.new(0.33, -2.1, -178.11)
+            l_v3904_0.CFrame  = l_l_l_char_17_Pivot_0_1 * CFrame.new(0.33, -5, -180.11)
             l_v3904_0.Parent  = workspace.Thrown
             _EnabledAllVisuals(l_v3904_0)
         end)
@@ -742,9 +744,173 @@ end -- fireDropkick
 end
 
 -- ============================================================
+-- STARTUP SPEED LINES
+-- ============================================================
+local function DropKickStartUpSpeedLines(data)
+    local _char = data.char
+    local _Bind = data.Bind
+    local KJEffects = game.ReplicatedStorage.Resources.KJEffects
+    local TweenService = game:GetService("TweenService")
+    local RunService   = game:GetService("RunService")
+    local Debris       = game:GetService("Debris")
+
+    local function _EnableAllVisuals(parent)
+        for _, desc in ipairs(parent:GetDescendants()) do
+            if desc:IsA("ParticleEmitter") or desc:IsA("Beam") then desc.Enabled = true end
+        end
+    end
+    local function _Lerp2(a, b, t) return a + (b - a) * t end
+    local function _SetBeamTransparency(part, val)
+        for _, d in ipairs(part:GetDescendants()) do
+            if d:IsA("Beam") then d.Transparency = NumberSequence.new(val) end
+        end
+    end
+    local function _SetBeamTextureSpeed(part, val)
+        for _, d in ipairs(part:GetDescendants()) do
+            if d:IsA("Beam") then d.TextureSpeed = val end
+        end
+    end
+    local function _UnixConn(duration, callback, checkFn)
+        local start = os.clock()
+        local conn
+        conn = RunService.Heartbeat:Connect(function()
+            local elapsed = os.clock() - start
+            local alpha   = math.clamp(elapsed / duration, 0, 1)
+            if checkFn and not checkFn() then conn:Disconnect(); return end
+            callback(alpha)
+            if elapsed >= duration then conn:Disconnect() end
+        end)
+    end
+
+    local speedMain  = KJEffects.speedlinesandstuff:Clone()
+    local _primaryPart = _char:FindFirstChild("PrimaryPart")
+    local _baseCF = _primaryPart and _primaryPart.CFrame or CFrame.new(_char:GetPivot().Position)
+    speedMain.CFrame = _baseCF * CFrame.new(-0.819, 6.149, -102.914)
+    speedMain.Parent = workspace.Thrown
+
+    local speedUnder = speedMain.thespeedthingunderultik
+    speedUnder.CFrame = _baseCF * CFrame.new(-0.019, -2.95, 23.185)
+    speedUnder.Parent = workspace.Thrown
+
+    local bindEnded      = false
+    local endSeqRun      = false
+
+    local function EndBeamSequence()
+        endSeqRun = true
+        Debris:AddItem(speedMain,  4)
+        Debris:AddItem(speedUnder, 4)
+        local tn = Instance.new("NumberValue"); tn.Value = 0
+        TweenService:Create(tn, TweenInfo.new(1, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {Value=1}):Play()
+        tn:GetPropertyChangedSignal("Value"):Connect(function()
+            _SetBeamTransparency(speedMain,  tn.Value)
+            _SetBeamTransparency(speedUnder, tn.Value)
+        end)
+        local sn = Instance.new("NumberValue"); sn.Value = 6
+        TweenService:Create(sn, TweenInfo.new(2, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {Value=0}):Play()
+        sn:GetPropertyChangedSignal("Value"):Connect(function()
+            _SetBeamTextureSpeed(speedMain,  sn.Value)
+            _SetBeamTextureSpeed(speedUnder, sn.Value)
+        end)
+    end
+
+    _SetBeamTransparency(speedMain,  1); _SetBeamTransparency(speedUnder, 1)
+    _SetBeamTextureSpeed(speedMain,  6); _SetBeamTextureSpeed(speedUnder, 6)
+    _UnixConn(1.5, function(alpha)
+        _SetBeamTransparency(speedMain,  alpha)
+        _SetBeamTransparency(speedUnder, alpha)
+    end, function()
+        if bindEnded then EndBeamSequence(); return false end
+        return true
+    end)
+    task.delay(1.5, function()
+        if bindEnded and not endSeqRun then EndBeamSequence(); return end
+        if not bindEnded then
+            _UnixConn(4.617, function(alpha)
+                _SetBeamTransparency(speedMain,  alpha); _SetBeamTransparency(speedUnder, alpha)
+                local spd = _Lerp2(6, 0, alpha)
+                _SetBeamTextureSpeed(speedMain, spd); _SetBeamTextureSpeed(speedUnder, spd)
+            end, function()
+                if bindEnded then EndBeamSequence(); return false end
+                return true
+            end)
+        end
+    end)
+
+    _EnableAllVisuals(speedMain)
+    local tweenHandles = {}
+    for _, child in ipairs(speedMain:GetChildren()) do
+        if child:IsA("ParticleEmitter") then
+            TweenService:Create(child, TweenInfo.new(0.95, Enum.EasingStyle.Quart, Enum.EasingDirection.InOut), {Rate=900}):Play()
+            task.delay(0.95, function()
+                local t = TweenService:Create(child, TweenInfo.new(3.75, Enum.EasingStyle.Linear), {Rate=0})
+                t:Play(); table.insert(tweenHandles, t)
+            end)
+        end
+    end
+
+    local renderConn
+    renderConn = RunService.RenderStepped:Connect(function()
+        if _Bind and _Bind.Parent then
+            local pp = _char:FindFirstChild("PrimaryPart")
+            local cf = pp and pp.CFrame or CFrame.new(_char:GetPivot().Position)
+            speedMain.CFrame  = cf * CFrame.new(-0.819, 6.149, -102.914)
+            speedUnder.CFrame = cf * CFrame.new(-0.019, -2.95,  23.185)
+        else
+            bindEnded = true
+            for i, t in pairs(tweenHandles) do table.remove(tweenHandles, i); t:Cancel() end
+            for _, d in ipairs(speedMain:GetDescendants()) do
+                if d:IsA("ParticleEmitter") then d.Enabled = false end
+            end
+            renderConn:Disconnect()
+            Debris:AddItem(speedMain, 6)
+        end
+    end)
+end
+
+-- ============================================================
 -- HITBOX
 -- ============================================================
 local targetHRPRef = nil   -- set on hit so the cleanup can unanchor the target
+
+-- Non-rotating anchor part: follows HRP position each frame but never picks up
+-- animation rotation, so speed lines stay world-aligned
+local primaryPart = Instance.new("Part")
+primaryPart.Name        = "PrimaryPart"
+primaryPart.Size        = Vector3.new(1, 1, 1)
+primaryPart.Anchored    = true
+primaryPart.CanCollide  = false
+primaryPart.Transparency = 1
+primaryPart.CFrame      = CFrame.new(hrp.Position, hrp.Position + Vector3.new(hrp.CFrame.LookVector.X, 0, hrp.CFrame.LookVector.Z))
+primaryPart.Parent      = character
+
+game:GetService("RunService").RenderStepped:Connect(function()
+    if hrp and hrp.Parent then
+        local lv = hrp.CFrame.LookVector
+        primaryPart.CFrame = CFrame.new(hrp.Position, hrp.Position + Vector3.new(lv.X, 0, lv.Z))
+    end
+end)
+
+-- Play startup animation immediately (looped so it runs for the full dash)
+getgenv().Animator6D(116986817262573, 1, true)
+
+-- Startup sounds via Sound6D
+Sound6D("rbxassetid://17356346310", 1)
+Sound6D("rbxassetid://17429233290", 1)
+
+-- Helper to stop startup sounds when hitbox connects — finds them by SoundId in the character
+local startupSoundIds = { "rbxassetid://17356346310", "rbxassetid://17429233290" }
+local function stopStartupSounds()
+    for _, desc in ipairs(character:GetDescendants()) do
+        if desc:IsA("Sound") then
+            for _, id in ipairs(startupSoundIds) do
+                if desc.SoundId == id then
+                    desc:Stop()
+                    desc:Destroy()
+                end
+            end
+        end
+    end
+end
 
 task.delay(1.79, function()
     local hitbox = Instance.new("Part")
@@ -762,6 +928,23 @@ task.delay(1.79, function()
     weld.Part1  = hitbox
     weld.Parent = hitbox
 
+    -- BodyVelocity: push forward at 180 on X/Z only — Y force is 0 so gravity is untouched
+    local bv = Instance.new("BodyVelocity")
+    bv.MaxForce = Vector3.new(9e9, 0, 9e9)
+    bv.Velocity = Vector3.new(hrp.CFrame.LookVector.X * 180, 0, hrp.CFrame.LookVector.Z * 180)
+    bv.Parent   = hrp
+
+    -- Update velocity each frame so it stays locked to look direction while dashing
+    local bvConn
+    bvConn = game:GetService("RunService").RenderStepped:Connect(function()
+        if hrp and hrp.Parent and bv and bv.Parent then
+            bv.Velocity = Vector3.new(hrp.CFrame.LookVector.X * 180, 0, hrp.CFrame.LookVector.Z * 180)
+        end
+    end)
+
+    -- Speed lines tied to the bind folder (they clean themselves up naturally)
+    DropKickStartUpSpeedLines({ char = character, Bind = bind })
+
     local fired = false
     local conn
     conn = hitbox.Touched:Connect(function(hit)
@@ -773,6 +956,20 @@ task.delay(1.79, function()
         conn:Disconnect()
         hitbox:Destroy()
 
+        -- Stop the startup animation now that the hit has landed
+        getgenv().Animator6DStop()
+
+        -- Stop startup sounds and play hit sounds
+        stopStartupSounds()
+        Sound6D("rbxassetid://17363374089", 1)
+        Sound6D("rbxassetid://17363377920", 1)
+
+        -- Stop the velocity update loop and destroy bv, then kill leftover
+        -- momentum so the attacker doesn't slide into the target before anchoring
+        bvConn:Disconnect()
+        bv:Destroy()
+        hrp.AssemblyLinearVelocity = Vector3.zero
+
         -- Snap ogrootcfr to where we are RIGHT NOW so the whole
         -- sequence plays from current position, not script-start position
         v1090.ogrootcfr = hrp.CFrame
@@ -780,7 +977,7 @@ task.delay(1.79, function()
         -- Place target 3 studs in front of current position, facing back at us
         local targetHRP = targetChar:FindFirstChild("HumanoidRootPart")
         if targetHRP then
-            targetHRP.CFrame = v1090.ogrootcfr * CFrame.new(0, 0, -5) * CFrame.Angles(0, math.pi, 0)
+            targetHRP.CFrame = v1090.ogrootcfr * CFrame.new(0, 0, -12) * CFrame.Angles(0, math.pi, 0)
             targetHRP.Anchored = true   -- prevent gravity sinking them during the sequence
             targetHRPRef = targetHRP    -- expose to outer cleanup
         end
@@ -799,11 +996,9 @@ task.delay(1.79, function()
         -- Anchor us for the sequence duration
         hrp.Anchored = true
 
-        -- Apply attacker offset: move the WHOLE character and sync ogrootcfr so
-        -- fireDropkick's PivotTo(ogrootcfr) doesn't snap us back to the ground
-        local attackerOffsetCFrame = hrp.CFrame * CFrame.new(0, ATTACKER_OFFSET_UP, ATTACKER_OFFSET_BACK)
-        character:PivotTo(attackerOffsetCFrame)
-        v1090.ogrootcfr = attackerOffsetCFrame
+        -- Apply attacker offset: nudge the HRP directly without touching ogrootcfr
+        -- (VFX all derive from ogrootcfr which stays at the actual hit position)
+        hrp.CFrame = hrp.CFrame * CFrame.new(0, ATTACKER_OFFSET_UP, ATTACKER_OFFSET_BACK)
 
         -- Play hit animation on the target using Animator6D
         getgenv().Animator6D(113199002278564, 1, false, targetChar)
@@ -815,7 +1010,11 @@ task.delay(1.79, function()
     task.delay(4.87, function()
         if not fired then
             conn:Disconnect()
+            bvConn:Disconnect()
+            pcall(function() bv:Destroy() end)
             pcall(function() hitbox:Destroy() end)
+            getgenv().Animator6DStop()
+            stopStartupSounds()
         end
     end)
 end)
