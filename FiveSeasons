@@ -1254,7 +1254,7 @@ local char = game.Players.LocalPlayer.Character
 
 v12({ Effect = "Five Season Startup", Char = char })
 
-task.wait(8) -- matches original timing before camera phase
+task.wait(8.25) -- matches original timing before camera phase
 
 v12({ Effect = "Five Season Camera", Char = char })
 
