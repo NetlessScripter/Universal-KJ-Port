@@ -1,0 +1,747 @@
+--[[
+================================================================================
+  EXTRACTION — DropkickWholeMoveSequence.lua
+================================================================================
+
+  SOURCE
+  ------
+  Stripped from tsb_interpreter.txt — the full TSB LocalScript (~149k lines).
+  Effect block: elseif v1091 == "DropkickWholeMoveSequence"
+
+  HOW TO USE
+  ----------
+  Paste into your exploit executor while inside The Strongest Battlegrounds.
+  The effect fires on YOUR character. To target a different hit character, 
+  change the `hit = character` line in ENTRY POINT SETUP to the target model.
+
+  ANIMATION GATE — HANDLED
+  ------------------------
+  Original gate: if not v1090.humanoid → play anim only, return.
+  Fixed by passing humanoid = true, which routes directly to the VFX body.
+
+  DEPENDENCIES INCLUDED
+  ----------------------
+    v10           TweenService
+    Util          inlined (EnabledAllVisuals, UnixConnection, UnixConnection2, Lerp)
+    Sound6D       loadstring sound module (NetlessScripter/Universal-KJ-Port)
+    Animator6D    loadstring animation module (NetlessScripter/Universal-KJ-Port)
+    v1058         resource loader / maid helper (inline)
+    l_Debris_0    Debris service
+    v31           RaycastParams (filters workspace.Thrown / workspace.Live)
+    l_Cutscenes_0 game.ReplicatedStorage.Cutscenes (for DROPKICK cam data)
+    EaseOutSixtic global ease function (assigned as in original)
+    shared stub   SetCore
+
+  BIND FOLDER
+  -----------
+  A Folder named "DropkickBind" is created under your character.
+  All timed sub-effects check `bind.Parent` to know if they should run.
+  It auto-destroys after 15s. Destroy it early to abort remaining effects.
+
+================================================================================
+]]
+
+-- ============================================================
+-- MODULES
+-- ============================================================
+loadstring(game:HttpGet("https://raw.githubusercontent.com/NetlessScripter/Universal-KJ-Port/refs/heads/main/Sound%20Module"))()
+if not getgenv().Animator6DLoadedPro then
+    loadstring(game:HttpGet("https://raw.githubusercontent.com/NetlessScripter/Universal-KJ-Port/refs/heads/main/Animation%20Module"))()
+end
+getgenv().Animator6D(99542888525023, 1, false);
+-- ============================================================
+-- GLOBALS
+-- ============================================================
+local v10             = game:service("TweenService")
+local l_Debris_0      = game:GetService("Debris")
+local l_LocalPlayer_0 = game.Players.LocalPlayer
+local l_Cutscenes_0   = game.ReplicatedStorage.Cutscenes
+
+local v31 = RaycastParams.new()
+v31.FilterDescendantsInstances = { workspace.Thrown, workspace.Live }
+
+-- shared stub
+shared.SetCore = shared.SetCore or function() end
+
+-- ── Inline Util (replaces require(game.ReplicatedStorage.Util)) ──────────────
+local _tempFuncs = {}
+game:GetService("RunService").RenderStepped:Connect(function(dt)
+    for i = #_tempFuncs, 1, -1 do
+        if _tempFuncs[i](dt) then table.remove(_tempFuncs, i) end
+    end
+end)
+local function _EnabledAllVisuals(p)
+    for _, v in pairs(p:GetDescendants()) do
+        if v:IsA("ParticleEmitter") or v:IsA("Beam") or v:IsA("Trail") or v:IsA("PointLight") then
+            v.Enabled = true
+        end
+    end
+end
+local function _Lerp(a, b, t) return a + (b - a) * t end
+local function _UnixConnection2(duration, callback, cancelCheck, onDone)
+    local done, fired, startT = false, false, tick()
+    table.insert(_tempFuncs, function(dt)
+        done = startT + duration <= tick()
+        if callback and (cancelCheck == nil or cancelCheck()) and not done then
+            local alpha = (tick() - startT) / duration
+            callback(alpha, dt, _Lerp(1, 0, alpha), tick() - startT)
+        elseif not fired then
+            fired = true
+            if callback and done then callback(1, dt, 0, duration) end
+            if onDone then onDone(1, dt, 0) end
+            return true
+        end
+    end)
+end
+
+-- EaseOutSixtic (global — original assigns it globally inside the effect body)
+EaseOutSixtic = function(v3903)
+    return v3903 ^ 6
+end
+
+-- ============================================================
+-- v1058: resource loader / maid helper
+-- ============================================================
+local function v1058(v1035, v1036, v1037)
+    local v1038 = {}
+    for _, v1040 in pairs(v1035:GetChildren()) do
+        v1038[v1040.Name] = v1040
+    end
+    local v1048 = setmetatable({}, {
+        __index = function(_, v1042)
+            return {
+                Clone = function(_)
+                    local v1044 = rawget(v1038, v1042):Clone()
+                    if not table.find(v1036, v1044) then
+                        table.insert(v1036, v1044)
+                    end
+                    return v1044
+                end,
+                GetChildren = function(_)
+                    return rawget(v1038, v1042):GetChildren()
+                end,
+                GetAttribute = function(_, v1047)
+                    return rawget(v1038, v1042):GetAttribute(v1047)
+                end,
+            }
+        end,
+    })
+    local v1049 = { _maid = {} }
+    local function v1052(_, v1051)
+        if not table.find(v1036, v1051) then
+            table.insert(v1036, v1051)
+        end
+        return v1051
+    end
+    v1049._maid.give    = v1052
+    v1049._maid.giveTask = v1052
+    local function cleanup()
+        if v1048 and v1049 then table.clear(v1048); table.clear(v1049) end
+        if v1038 then table.clear(v1038); v1038 = nil end
+        v1049 = nil; v1048 = nil
+        if v1036 then
+            for v1055, v1056 in pairs(v1036) do
+                if typeof(v1056) == "RBXScriptConnection" then v1056:Disconnect()
+                elseif typeof(v1056) == "Instance" then v1056:Destroy() end
+                v1036[v1055] = nil
+            end
+            table.clear(v1036)
+        end
+        v1036 = nil
+    end
+    local v1057 = (v1037 ~= nil and typeof(v1037) == "number") and v1037 or 10
+    task.delay(v1057, cleanup)
+    return v1048, v1049, cleanup
+end
+
+-- ============================================================
+-- ENTRY POINT SETUP
+-- ============================================================
+local player    = game.Players.LocalPlayer
+local character = player.Character or player.CharacterAdded:Wait()
+local hrp       = character:WaitForChild("HumanoidRootPart")
+
+-- Bind folder: sub-effects poll this; destroy it to abort the sequence early
+local bind = Instance.new("Folder")
+bind.Name  = "DropkickBind"
+bind.Parent = character
+
+-- CameraPart: tracked behind/above the caster for the scripted camera
+local cameraPart = Instance.new("Part")
+cameraPart.Anchored    = true
+cameraPart.CanCollide  = false
+cameraPart.Transparency = 1
+cameraPart.Size        = Vector3.new(1, 1, 1)
+cameraPart.CFrame      = hrp.CFrame * CFrame.new(0, 2, -10) * CFrame.Angles(0, math.pi, 0)
+cameraPart.Parent      = workspace.Thrown
+
+-- Keep cameraPart synced to HRP each frame during the sequence
+local camConn = game:GetService("RunService").RenderStepped:Connect(function()
+    if hrp and hrp.Parent then
+        cameraPart.CFrame = hrp.CFrame * CFrame.new(0, 2, -10) * CFrame.Angles(0, math.pi, 0)
+    end
+end)
+
+-- Auto-cleanup after the full sequence (~15s)
+task.delay(15, function()
+    camConn:Disconnect()
+    pcall(function() cameraPart:Destroy() end)
+    if bind.Parent then bind:Destroy() end
+end)
+
+-- v1090: effect params (mirrors what the original v12 dispatcher receives)
+local v1090 = {
+    Effect     = "DropkickWholeMoveSequence",
+    char       = character,
+    hit        = character,        -- change to your target character model if desired
+    bind       = bind,
+    Bind       = bind,
+    ogrootcfr  = character:GetPivot(),
+    CameraPart = cameraPart,
+    humanoid   = true,             -- truthy → skips animation-only branch
+}
+
+-- ============================================================
+-- EFFECT BODY (verbatim from tsb_interpreter.txt, cleaned up)
+-- ============================================================
+local l_char_17     = v1090.char
+local l_hit_12      = v1090.hit
+local v3897         = {}
+local l_KJEffects_1 = game.ReplicatedStorage.Resources.KJEffects
+local v3899, _      = v1058(game.ReplicatedStorage.Resources.KJEffects, v3897, 25)
+local l_bind_1      = v1090.bind
+
+-- v1090.humanoid is true → skip the animation-only gate, go straight to VFX
+do
+    local v3904 = nil
+    local v3905 = nil
+    local v3906 = true
+    if l_LocalPlayer_0.Character ~= l_char_17 then
+        v3906 = (l_LocalPlayer_0.Character == l_hit_12)
+    end
+    local l_v3906_0       = v3906
+    local l_l_char_17_0   = l_char_17
+
+    -- Camera cutscene task (runs when we are the local caster)
+    task.spawn(function()
+        if not l_v3906_0 then return end
+        local v3909 = 0
+        local v3910 = nil
+        local v3911 = 0
+        local v3912 = DROPKICK or require(l_Cutscenes_0.Dropkick)
+        if not DROPKICK then DROPKICK = v3912 end
+
+        Sound6D("rbxassetid://17363383992", 2)
+
+        local l_Bind_2        = v1090.Bind
+        local l_CurrentCamera_6 = workspace.CurrentCamera
+        if l_LocalPlayer_0.Character then
+            shared.SetCore(false, nil, true)
+            local v3915    = tick()
+            local l_Folder_3 = Instance.new("Folder")
+            l_Folder_3.Name   = "NoRotate"
+            l_Folder_3.Parent = l_l_char_17_0
+            l_l_char_17_0:SetAttribute("NoHeadFollow", true)
+            local l_Character_12 = l_LocalPlayer_0.Character
+
+            v3910 = game:GetService("RunService").RenderStepped:Connect(function(v3918)
+                local v3919 = v3918 * 60
+                v3909 = v3909 + v3919
+                local v3920 = tonumber(math.ceil(v3909))
+                if v3920 >= 922 then v3920 = 2000000000 end
+                local v3921 = v3912[v3920]
+
+                if v3921 and l_Bind_2.Parent and l_Character_12.Parent then
+                    if l_CurrentCamera_6.CameraType ~= Enum.CameraType.Scriptable then
+                        l_CurrentCamera_6.CameraType = Enum.CameraType.Scriptable
+                    end
+                    v3911 = v3911 + v3919
+                    if v3921 then
+                        if tick() - v3915 > 0.5 then
+                            l_CurrentCamera_6.FieldOfView = v3921.fov
+                        else
+                            local fov = l_CurrentCamera_6.FieldOfView
+                            l_CurrentCamera_6.FieldOfView = fov + (v3921.fov - fov) * 0.25
+                        end
+                    end
+                    if l_l_char_17_0:FindFirstChild("NoRotate") then
+                        if tick() - v3915 > 0.5 then
+                            l_CurrentCamera_6.CFrame = l_CurrentCamera_6.CFrame:lerp(v1090.CameraPart.CFrame, 0.9)
+                        else
+                            l_CurrentCamera_6.CFrame = l_CurrentCamera_6.CFrame:lerp(v1090.CameraPart.CFrame, 0.25)
+                        end
+                        return
+                    end
+                else
+                    -- Cutscene ended → restore
+                    if l_LocalPlayer_0.Character == l_l_char_17_0 then
+                        pcall(function()
+                            getgenv().Animator6D(17420414480, 1, false)
+                            l_l_char_17_0:PivotTo(v1090.ogrootcfr * CFrame.new(0, 0.15, -174.531))
+                            task.delay(0.5, function() l_Folder_3:Destroy() end)
+                        end)
+                    end
+                    if v3904 then v3904:Destroy() end
+                    if v3905 then v3905:Destroy() end
+                    v3910:Disconnect()
+                    shared.SetCore(true, nil, true)
+                    l_CurrentCamera_6.CameraType = Enum.CameraType.Custom
+                    task.delay(0.5, function()
+                        l_l_char_17_0:SetAttribute("NoHeadFollow", false)
+                    end)
+                    v10:Create(l_CurrentCamera_6, TweenInfo.new(1, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {
+                        FieldOfView = 70,
+                    }):Play()
+                end
+            end)
+        else
+            task.delay(2.84, function()
+                if not l_Bind_2.Parent then return end
+            end)
+        end
+    end)
+
+    -- Pivot caster to stored origin
+    l_char_17:PivotTo(v1090.ogrootcfr)
+    local l_l_char_17_Pivot_0   = l_char_17:GetPivot()
+    local l_Torso_8              = l_hit_12:FindFirstChild("Torso")
+    local l_HumanoidRootPart_4   = l_hit_12:FindFirstChild("HumanoidRootPart")
+
+    -- ── Speedlines ────────────────────────────────────────────
+    local v3936 = v3899.speedlines:Clone()
+    v3936.CFrame = l_l_char_17_Pivot_0 * CFrame.new(-4.55, 11.47, 1.5)
+    if v3906 then v3936.Parent = workspace.Thrown end
+    _EnabledAllVisuals(v3936)
+    local l_v3936_0 = v3936
+    task.delay(2.5, function()
+        for _, v3939 in pairs(l_v3936_0:GetChildren()) do
+            v10:Create(v3939, TweenInfo.new(0.767, Enum.EasingStyle.Linear, Enum.EasingDirection.InOut), {
+                Rate = 0,
+            }):Play()
+        end
+    end)
+
+    -- ── First-hit impact ──────────────────────────────────────
+    local l_l_KJEffects_1_0    = l_KJEffects_1
+    local l_l_Torso_8_0        = l_Torso_8
+    local l_l_HumanoidRootPart_4_0 = l_HumanoidRootPart_4
+    task.delay(0.3, function()
+        local v3943 = l_l_KJEffects_1_0.DropkickExtra.firstHit:Clone()
+        v3943.Position = l_l_Torso_8_0.Position
+        v3943.Anchored = true
+        v3943.CFrame   = l_l_HumanoidRootPart_4_0.CFrame
+        v3943.Parent   = workspace.Thrown
+        for _, v3945 in v3943:GetDescendants() do
+            if v3945:IsA("ParticleEmitter") then
+                v3945:Emit(v3945:GetAttribute("EmitCount"))
+            end
+        end
+        task.delay(3, v3943.Destroy, v3943)
+    end)
+
+    -- ── ImpactFloorBeams ──────────────────────────────────────
+    local v3946     = v3899.ImpactFloorBeams:Clone()
+    v3946.CFrame    = l_l_char_17_Pivot_0 * CFrame.new(-0.969, -2.5, 5.084)
+    v3946.Parent    = workspace.Thrown
+    local l_l_bind_1_0 = l_bind_1
+    local l_v3946_0    = v3946
+    task.delay(4.7, function()
+        l_Debris_0:AddItem(l_v3936_0, 1)
+        if not l_l_bind_1_0 or not l_l_bind_1_0.Parent then return end
+        l_v3946_0.floortradmillthin.hellooooo.TextureSpeed = -9
+        l_v3946_0.floortradmillthin.byeeeee.TextureSpeed   = -4
+        v10:Create(l_v3946_0.floortradmillthin.byeeeee,
+            TweenInfo.new(1.267, Enum.EasingStyle.Quad, Enum.EasingDirection.Out),
+            { TextureSpeed = -0.2 }):Play()
+        v10:Create(l_v3946_0.floortradmillthin.hellooooo,
+            TweenInfo.new(1.267, Enum.EasingStyle.Quad, Enum.EasingDirection.Out),
+            { TextureSpeed = -0.2 }):Play()
+        _UnixConnection2(4.95, function(v3949)
+            v3949 = v10:GetValue(v3949, Enum.EasingStyle.Quad, Enum.EasingDirection.Out)
+            local v3950 = _Lerp(0, 1, v3949)
+            l_v3946_0.floortradmillthin.byeeeee.Transparency  = NumberSequence.new(v3950)
+            l_v3946_0.floortradmillthin.hellooooo.Transparency = NumberSequence.new(v3950)
+        end)
+        _UnixConnection2(7.05, function(v3951)
+            v3951 = v10:GetValue(v3951, Enum.EasingStyle.Sine, Enum.EasingDirection.Out)
+            local v3952 = _Lerp(0.3, 1, v3951)
+            l_v3946_0.windone["12893198328"].Transparency   = NumberSequence.new(v3952)
+            l_v3946_0.windone11["12718273187"].Transparency = NumberSequence.new(v3952)
+        end)
+        _UnixConnection2(2.684, function(v3953)
+            v3953 = EaseOutSixtic(v3953)
+            local v3954 = _Lerp(7, 0.2, v3953)
+            l_v3946_0.windone["12893198328"].TextureSpeed   = v3954
+            l_v3946_0.windone11["12718273187"].TextureSpeed = v3954
+        end)
+        l_Debris_0:AddItem(l_v3946_0, 10)
+    end)
+
+    if not l_bind_1 or not l_bind_1.Parent then return end
+
+    -- ── Flash waves ───────────────────────────────────────────
+    local v3955 = v3899.FlashWaveone:Clone()
+    v3955.CFrame = l_l_char_17_Pivot_0 * CFrame.new(1.43, 1.55, -164) * CFrame.Angles(0, -1.5707963267948966, 0)
+    v3955.Decal.Transparency = 0
+    v3955.Mesh.Scale = Vector3.new(0, 0, 0)
+    v3955.Parent = workspace.Thrown
+
+    local v3956 = v3899.FlashWavetwo:Clone()
+    v3956.CFrame = l_l_char_17_Pivot_0 * CFrame.new(1.43, 1.55, -125.91) * CFrame.Angles(1.5707963267948966, -0.6806784082777885, 1.5707963267948966)
+    v3956.Decal.Transparency = 0
+    v3956.Mesh.Scale = Vector3.new(0, 0, 0)
+    v3956.Parent = workspace.Thrown
+
+    local v3957 = v3899.FlashWavethree:Clone()
+    v3957.CFrame = l_l_char_17_Pivot_0 * CFrame.new(1.13, 1.328, -56.41) * CFrame.Angles(-1.5707963267948966, 0.4537856055185257, -1.5707963267948966)
+    v3957.Decal.Transparency = -1
+    v3957.Mesh.Scale = Vector3.new(0, 0, 0)
+    v3957.Parent = workspace.Thrown
+
+    local v3958 = v3899.thingnearthree:Clone()
+    v3958.Decal.Transparency = -1
+    v3958.Mesh.Scale = Vector3.new(0, 0, 0)
+    v3958.CFrame = l_l_char_17_Pivot_0 * CFrame.new(1.13, 1.328, -56.41) * CFrame.Angles(-1.5707963267948966, 0.4537856055185257, -1.5707963267948966)
+    v3958.Parent = workspace.Thrown
+
+    local v3959 = v3899.thingneartwo:Clone()
+    v3959.Decal.Transparency = 0
+    v3959.Mesh.Scale = Vector3.new(0, 0, 0)
+    v3959.CFrame = l_l_char_17_Pivot_0 * CFrame.new(1.13, 1.32, -113.66) * CFrame.Angles(1.5707963267948966, 1.0471975511965976, 1.5707963267948966)
+    v3959.Parent = workspace.Thrown
+
+    local v3960 = v3899.thingnearone:Clone()
+    v3960.CFrame = l_l_char_17_Pivot_0 * CFrame.new(1.135, 1.32, -166.315) * CFrame.Angles(-1.5707963267948966, 0.4537856055185257, -1.5707963267948966)
+    v3960.Decal.Transparency = 0.5
+    v3960.Mesh.Scale = Vector3.new(0, 0, 0)
+    v3960.Parent = workspace.Thrown
+
+    local l_l_bind_1_1           = l_bind_1
+    local l_v3955_0              = v3955
+    local l_l_l_char_17_Pivot_0_0 = l_l_char_17_Pivot_0
+
+    -- FlashWaveone tween
+    task.delay(4.4, function()
+        if not l_l_bind_1_1 or not l_l_bind_1_1.Parent then return end
+        _UnixConnection2(1.55, function(v3964)
+            local v3965 = Vector3.new(0,0,0):Lerp(Vector3.new(0.256, 0.119, 0.122), v3964)
+            l_v3955_0.Mesh.Scale = v3965
+        end)
+        task.delay(1.55, function()
+            if not l_l_bind_1_1 or not l_l_bind_1_1.Parent then return end
+            v10:Create(l_v3955_0.Mesh, TweenInfo.new(0.6, Enum.EasingStyle.Linear), {
+                Scale = Vector3.new(0.256, 0.119, 0.122),
+            }):Play()
+        end)
+        if not l_l_bind_1_1 or not l_l_bind_1_1.Parent then return end
+        v10:Create(l_v3955_0.Decal, TweenInfo.new(1.967, Enum.EasingStyle.Linear, Enum.EasingDirection.In), {
+            Transparency = 0.6,
+        }):Play()
+        task.delay(1.967, function()
+            v10:Create(l_v3955_0.Decal, TweenInfo.new(2.383, Enum.EasingStyle.Linear), {
+                Transparency = 1,
+            }):Play()
+        end)
+        v10:Create(l_v3955_0, TweenInfo.new(4.417, Enum.EasingStyle.Linear), {
+            CFrame = l_l_l_char_17_Pivot_0_0 * CFrame.new(1.435, 1.55, -160.76) *
+                CFrame.Angles(1.5707963267948966, 0.291469985083053, 1.5707963267948966),
+        }):Play()
+        l_Debris_0:AddItem(l_v3955_0, 10)
+    end)
+
+    -- FlashWavetwo tween
+    local l_v3956_0 = v3956
+    task.delay(4.7, function()
+        if not l_l_bind_1_1 or not l_l_bind_1_1.Parent then return end
+        v10:Create(l_v3956_0.Mesh, TweenInfo.new(2.5, Enum.EasingStyle.Exponential, Enum.EasingDirection.Out), {
+            Scale = Vector3.new(1, 0.5, 0.5),
+        }):Play()
+        task.delay(2.5, function()
+            v10:Create(l_v3956_0.Mesh, TweenInfo.new(0.984, Enum.EasingStyle.Linear), {
+                Scale = Vector3.new(1, 0.5, 0.5),
+            }):Play()
+        end)
+        v10:Create(l_v3956_0.Decal, TweenInfo.new(3.45, Enum.EasingStyle.Cubic, Enum.EasingDirection.Out), {
+            Transparency = 1,
+        }):Play()
+        v10:Create(l_v3956_0, TweenInfo.new(3.45, Enum.EasingStyle.Cubic, Enum.EasingDirection.Out), {
+            CFrame = l_l_l_char_17_Pivot_0_0 * CFrame.new(1.43, 1.5, -135.84) *
+                CFrame.Angles(-1.5707963267948966, -0.888896188040712, -1.5707963267948966),
+        }):Play()
+        l_Debris_0:AddItem(l_v3956_0, 10)
+    end)
+
+    -- FlashWavethree tween
+    local l_v3957_0 = v3957
+    task.delay(4.684, function()
+        if not l_l_bind_1_1 or not l_l_bind_1_1.Parent then return end
+        v10:Create(l_v3957_0.Mesh, TweenInfo.new(0.733, Enum.EasingStyle.Cubic, Enum.EasingDirection.Out), {
+            Scale = Vector3.new(3, 3, 3),
+        }):Play()
+        task.delay(0.733, function()
+            if not l_l_bind_1_1 or not l_l_bind_1_1.Parent then return end
+            v10:Create(l_v3957_0.Mesh, TweenInfo.new(0.2, Enum.EasingStyle.Linear), {
+                Scale = Vector3.new(2, 2, 2),
+            }):Play()
+        end)
+        if not l_l_bind_1_1 or not l_l_bind_1_1.Parent then return end
+        v10:Create(l_v3957_0.Decal, TweenInfo.new(0.85, Enum.EasingStyle.Cubic, Enum.EasingDirection.Out), {
+            Transparency = 1,
+        }):Play()
+        v10:Create(l_v3957_0, TweenInfo.new(1.583, Enum.EasingStyle.Cubic, Enum.EasingDirection.Out), {
+            CFrame = l_l_l_char_17_Pivot_0_0 * CFrame.new(1.13, 1.32, -81.52) *
+                CFrame.Angles(-1.5707963267948966, -0.7578219612159379, -1.5707963267948966),
+        }):Play()
+        l_Debris_0:AddItem(l_v3957_0, 10)
+    end)
+
+    -- thingnearone (v3960)
+    local l_v3960_0 = v3960
+    task.delay(4.7, function()
+        if not l_l_bind_1_1 or not l_l_bind_1_1.Parent then return end
+        v10:Create(l_v3960_0.Mesh, TweenInfo.new(3.184, Enum.EasingStyle.Circular, Enum.EasingDirection.Out), {
+            Scale = Vector3.new(0.13, 0.2, 0.2),
+        }):Play()
+        task.delay(3.184, function()
+            v10:Create(l_v3960_0.Mesh, TweenInfo.new(1.583, Enum.EasingStyle.Linear), {
+                Scale = Vector3.new(0.13, 0.2, 0.2),
+            }):Play()
+        end)
+        v10:Create(l_v3960_0.Decal, TweenInfo.new(3.75, Enum.EasingStyle.Cubic, Enum.EasingDirection.Out), {
+            Transparency = 0.8,
+        }):Play()
+        task.delay(3.75, function()
+            v10:Create(l_v3960_0.Decal, TweenInfo.new(1.017, Enum.EasingStyle.Linear, Enum.EasingDirection.InOut), {
+                Transparency = 1,
+            }):Play()
+        end)
+        if not l_l_bind_1_1 or not l_l_bind_1_1.Parent then return end
+        -- Note: original only creates the tween, does not call :Play() — preserved
+        v10:Create(l_v3960_0, TweenInfo.new(1.183, Enum.EasingStyle.Cubic, Enum.EasingDirection.Out), {
+            CFrame = l_l_l_char_17_Pivot_0_0 * CFrame.new(1.13, 1.32, -166.31) *
+                CFrame.Angles(-1.5707963267948966, -0.4003785304074992, -1.5707963267948966),
+        })
+        l_Debris_0:AddItem(l_v3960_0, 10)
+    end)
+
+    -- thingneartwo (v3959)
+    local l_v3959_0 = v3959
+    task.delay(4.7, function()
+        if not l_l_bind_1_1 or not l_l_bind_1_1.Parent then return end
+        _UnixConnection2(0.85, function(v3970)
+            v3970 = EaseOutSixtic(v3970)
+            local v3971 = Vector3.new(0,0,0):Lerp(Vector3.new(1, 2, 2), v3970)
+            l_v3959_0.Mesh.Scale = v3971
+        end)
+        if not l_l_bind_1_1 or not l_l_bind_1_1.Parent then return end
+        v10:Create(l_v3959_0.Decal, TweenInfo.new(1.667, Enum.EasingStyle.Cubic, Enum.EasingDirection.Out), {
+            Transparency = 1,
+        }):Play()
+        v10:Create(l_v3959_0, TweenInfo.new(1.55, Enum.EasingStyle.Cubic, Enum.EasingDirection.Out), {
+            CFrame = l_l_l_char_17_Pivot_0_0 * CFrame.new(1.13, 1.32, -124.75),
+        }):Play()
+        l_Debris_0:AddItem(l_v3959_0, 10)
+    end)
+
+    -- ── doSlam loop (ground impacts on the target) ────────────
+    local l_l_Torso_8_1          = l_Torso_8
+    local l_l_KJEffects_1_1      = l_KJEffects_1
+    local l_l_HumanoidRootPart_4_1 = l_HumanoidRootPart_4
+    task.delay(1.4, function()
+        if not l_l_bind_1_1 or not l_l_bind_1_1.Parent then return end
+        local function v3979()
+            if not l_l_bind_1_1 or not l_l_bind_1_1.Parent then return end
+            local v3975 = workspace:Raycast(l_l_Torso_8_1.Position, Vector3.new(0, -10, 0), v31)
+            if v3975 then
+                local v3976 = l_l_KJEffects_1_1.DropkickExtra.slam:Clone()
+                v3976.CFrame  = CFrame.lookAt(v3975.Position, v3975.Position + v3975.Normal)
+                v3976.Parent  = workspace.Thrown
+                for _, v3978 in v3976:GetDescendants() do
+                    if v3978:IsA("ParticleEmitter") then
+                        if v3978:GetAttribute("ChangeColor") then
+                            v3978.Color = ColorSequence.new(v3975.Instance.Color)
+                        end
+                        v3978:Emit(v3978:GetAttribute("EmitCount"))
+                    end
+                end
+                task.delay(2, v3976.Destroy, v3976)
+            end
+        end
+
+        v3979(); task.wait(0.6)
+        v3979(); task.wait(0.55)
+        v3979(); task.wait(0.58)
+
+        if not l_l_bind_1_1 or not l_l_bind_1_1.Parent then return end
+        local v3980 = l_l_KJEffects_1_1.DropkickExtra.drag:Clone()
+        v3980.Parent = workspace.Thrown
+        local v3981 = workspace:Raycast(l_l_Torso_8_1.Position, Vector3.new(0, -10, 0), v31)
+        if v3981 then
+            for _, v3983 in v3980:GetDescendants() do
+                if v3983:IsA("ParticleEmitter") and v3983:GetAttribute("ChangeColor") then
+                    v3983.Color = ColorSequence.new(v3981.Instance.Color)
+                end
+            end
+        end
+        local v3984 = os.clock()
+        while true do
+            task.wait(1/30)
+            if not l_l_bind_1_1 or not l_l_bind_1_1.Parent then return end
+            v3980.CFrame = CFrame.new(
+                l_l_Torso_8_1.Position,
+                l_l_Torso_8_1.Position + l_l_HumanoidRootPart_4_1.CFrame.LookVector
+            ) * CFrame.new(0, -1.8, 2)
+            if os.clock() - v3984 > 0.7 then
+                for _, v3986 in v3980:GetDescendants() do
+                    if v3986:IsA("ParticleEmitter") then v3986.Enabled = false end
+                end
+                task.wait(2.4)
+                v3980:Destroy()
+                return
+            end
+        end
+    end)
+
+    -- thingnearthree (v3958)
+    local l_v3958_0 = v3958
+    task.delay(4.684, function()
+        if not l_l_bind_1_1 or not l_l_bind_1_1.Parent then return end
+        v10:Create(l_v3958_0.Mesh, TweenInfo.new(0.733, Enum.EasingStyle.Cubic, Enum.EasingDirection.Out), {
+            Scale = Vector3.new(3, 3, 3),
+        }):Play()
+        task.delay(0.733, function()
+            v10:Create(l_v3958_0.Mesh, TweenInfo.new(0.734, Enum.EasingStyle.Linear), {
+                Scale = Vector3.new(2, 2, 2),
+            }):Play()
+        end)
+        v10:Create(l_v3958_0.Decal, TweenInfo.new(0.85, Enum.EasingStyle.Cubic, Enum.EasingDirection.Out), {
+            Transparency = 1,
+        }):Play()
+        v10:Create(l_v3958_0, TweenInfo.new(6.267, Enum.EasingStyle.Cubic, Enum.EasingDirection.Out), {
+            CFrame = l_l_l_char_17_Pivot_0_0 * CFrame.new(1.13, 1.32, -81.52) *
+                CFrame.Angles(-1.5707963267948966, -0.7578219612159379, -1.5707963267948966),
+        }):Play()
+        l_Debris_0:AddItem(l_v3958_0, 12)
+    end)
+
+    -- ── GUI: ImpactFrames + Text filmstrip ────────────────────
+    if not l_bind_1 or not l_bind_1.Parent then return end
+
+    local v3988 = v3899.ImpactFrames:Clone()
+    for _, v3990 in pairs(v3988:GetChildren()) do
+        v3990.Size    = UDim2.new(0, 1, 0, 1)
+        v3990.Visible = true
+    end
+    v3988.Parent = l_LocalPlayer_0.PlayerGui
+
+    v3905 = v3899.Text:Clone()
+    for _, v3992 in pairs(v3905:GetChildren()) do
+        v3992.Size    = UDim2.new(0, 1, 0, 1)
+        v3992.Visible = true
+    end
+    v3905.Parent = l_LocalPlayer_0.PlayerGui
+
+    local l_l_bind_1_2           = l_bind_1
+    local l_v3906_1              = v3906
+    local l_v3988_0              = v3988
+    local l_v3899_0              = v3899
+    local l_l_l_char_17_Pivot_0_1 = l_l_char_17_Pivot_0
+    do
+        local l_v3904_0, l_v3905_0 = v3904, v3905
+        task.delay(9.017, function()
+            if not l_l_bind_1_2 or not l_l_bind_1_2.Parent then return end
+            if not l_v3906_1 then return end
+
+            task.spawn(function()
+                -- ImpactFrames filmstrip (frames 1–8)
+                local v4000 = nil
+                for v4001 = 1, 8 do
+                    if v4000 then v4000.Visible = false end
+                    local v4002 = l_v3988_0["Frame" .. v4001]
+                    v4002.Size = UDim2.new(1, 0, 1, 0)
+                    v4000 = v4002
+                    task.wait(0.03)
+                end
+                l_v3988_0:Destroy()
+                task.wait(1.25)
+
+                local l_l_v3905_0_0 = l_v3905_0
+                local function v4008(v4006)
+                    local v4007 = tick()
+                    repeat task.wait() until v4006 < tick() - v4007
+                end
+
+                if not l_l_bind_1_2 or not l_l_bind_1_2.Parent then return end
+                -- Text filmstrip frames 1–4
+                task.spawn(function()
+                    for v4009 = 1, 4 do
+                        if not l_l_bind_1_2 or not l_l_bind_1_2.Parent then return end
+                        for _, v4011 in pairs(l_v3905_0:GetChildren()) do
+                            v4011.AnchorPoint = Vector2.new(0, 0)
+                            v4011.Position    = UDim2.new(0, 0, 0, 0)
+                            v4011.Size        = UDim2.new(0, 1, 0, 1)
+                        end
+                        local v4012 = l_l_v3905_0_0["Frame" .. v4009]
+                        v4012.AnchorPoint = Vector2.new(0.5, 0.5)
+                        v4012.Position    = UDim2.new(0.5, 0, 0.5, 0)
+                        v4012.Size        = UDim2.new(1, 0, 1, 0)
+                        v4008(0.015)
+                    end
+                end)
+                -- frames 5–8
+                task.delay(0.517, function()
+                    for v4013 = 5, 8 do
+                        for _, v4015 in pairs(l_l_v3905_0_0:GetChildren()) do
+                            v4015.AnchorPoint = Vector2.new(0, 0)
+                            v4015.Position    = UDim2.new(0, 0, 0, 0)
+                            v4015.Size        = UDim2.new(0, 1, 0, 1)
+                        end
+                        local v4016 = l_l_v3905_0_0["Frame" .. v4013]
+                        v4016.AnchorPoint = Vector2.new(0.5, 0.5)
+                        v4016.Position    = UDim2.new(0.5, 0, 0.5, 0)
+                        v4016.Size        = UDim2.new(1, 0, 1, 0)
+                        v4008(0.015)
+                    end
+                end)
+                -- frames 9–12
+                task.delay(1.05, function()
+                    for v4017 = 9, 12 do
+                        for _, v4019 in pairs(l_l_v3905_0_0:GetChildren()) do
+                            v4019.AnchorPoint = Vector2.new(0, 0)
+                            v4019.Position    = UDim2.new(0, 0, 0, 0)
+                            v4019.Size        = UDim2.new(0, 1, 0, 1)
+                        end
+                        local v4020 = l_l_v3905_0_0["Frame" .. v4017]
+                        v4020.AnchorPoint = Vector2.new(0.5, 0.5)
+                        v4020.Position    = UDim2.new(0.5, 0, 0.5, 0)
+                        v4020.Size        = UDim2.new(1, 0, 1, 0)
+                        v4008(0.015)
+                    end
+                end)
+                -- frames 13–16
+                task.delay(1.583, function()
+                    for v4021 = 13, 16 do
+                        for _, v4023 in pairs(l_l_v3905_0_0:GetChildren()) do
+                            v4023.AnchorPoint = Vector2.new(0, 0)
+                            v4023.Position    = UDim2.new(0, 0, 0, 0)
+                            v4023.Size        = UDim2.new(0, 1, 0, 1)
+                        end
+                        local v4024 = l_l_v3905_0_0["Frame" .. v4021]
+                        v4024.AnchorPoint = Vector2.new(0.5, 0.5)
+                        v4024.Position    = UDim2.new(0.5, 0, 0.5, 0)
+                        v4024.Size        = UDim2.new(1, 0, 1, 0)
+                        v4008(0.02)
+                    end
+                end)
+            end)
+
+            -- 202020BACKSCREEN (cinematic black fill part)
+            if not l_l_bind_1_2 or not l_l_bind_1_2.Parent then return end
+            l_v3904_0 = l_v3899_0["202020BACKSCREEN"]:Clone()
+            game.Debris:AddItem(l_v3904_0, 9)
+            l_v3904_0.CFrame  = l_l_l_char_17_Pivot_0_1 * CFrame.new(0.33, -2.1, -178.11)
+            l_v3904_0.Parent  = workspace.Thrown
+            _EnabledAllVisuals(l_v3904_0)
+        end)
+    end
+end
