@@ -162,8 +162,8 @@ local hrp       = character:WaitForChild("HumanoidRootPart")
 -- ── Attacker offset (applied the moment the hitbox fires) ────────────────────
 --   Positive UP   = move caster upward  (studs)
 --   Positive BACK = move caster backward, away from the target (studs)
-local ATTACKER_OFFSET_UP   = 2   -- studs upward
-local ATTACKER_OFFSET_BACK = -6  -- studs backward
+local ATTACKER_OFFSET_UP   = 3   -- studs upward
+local ATTACKER_OFFSET_BACK = -20  -- studs backward
 
 -- Bind folder: sub-effects poll this; destroy it to abort the sequence early
 local bind = Instance.new("Folder")
