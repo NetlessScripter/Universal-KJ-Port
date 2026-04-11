@@ -48,14 +48,12 @@ loadstring(game:HttpGet("https://raw.githubusercontent.com/NetlessScripter/Unive
 if not getgenv().Animator6DLoadedPro then
     loadstring(game:HttpGet("https://raw.githubusercontent.com/NetlessScripter/Universal-KJ-Port/refs/heads/main/Animation%20Module"))()
 end
-getgenv().Animator6D(17420452843, 1, false);
 -- ============================================================
 -- GLOBALS
 -- ============================================================
 local v10             = game:service("TweenService")
 local l_Debris_0      = game:GetService("Debris")
 local l_LocalPlayer_0 = game.Players.LocalPlayer
-local l_Cutscenes_0   = game.ReplicatedStorage.Cutscenes
 
 local v31 = RaycastParams.new()
 v31.FilterDescendantsInstances = { workspace.Thrown, workspace.Live }
@@ -184,6 +182,7 @@ end)
 
 -- Auto-cleanup after the full sequence (~15s)
 task.delay(15, function()
+    hrp.Anchored = false
     camConn:Disconnect()
     pcall(function() cameraPart:Destroy() end)
     if bind.Parent then bind:Destroy() end
@@ -204,8 +203,10 @@ local v1090 = {
 -- ============================================================
 -- EFFECT BODY (verbatim from tsb_interpreter.txt, cleaned up)
 -- ============================================================
+local function fireDropkick(hitTarget)
+getgenv().Animator6D(17420452843, 1, false)
 local l_char_17     = v1090.char
-local l_hit_12      = v1090.hit
+local l_hit_12      = hitTarget
 local v3897         = {}
 local l_KJEffects_1 = game.ReplicatedStorage.Resources.KJEffects
 local v3899, _      = v1058(game.ReplicatedStorage.Resources.KJEffects, v3897, 25)
@@ -225,52 +226,38 @@ do
     -- Camera cutscene task (runs when we are the local caster)
     task.spawn(function()
         if not l_v3906_0 then return end
-        local v3909 = 0
-        local v3910 = nil
-        local v3911 = 0
-        local v3912 = DROPKICK or require(l_Cutscenes_0.Dropkick)
-        if not DROPKICK then DROPKICK = v3912 end
+
+        -- Fetch frames from GitHub (relative CFrame + FOV per frame)
+        local _src    = game:HttpGet("https://raw.githubusercontent.com/NetlessScripter/Universal-KJ-Port/refs/heads/main/DropkickCutscene", true)
+        local v3912   = loadstring("return " .. _src:match("return%s*(.+)"))()
 
         Sound6D("rbxassetid://17363383992", 2)
 
-        local l_Bind_2        = v1090.Bind
+        local l_Bind_2          = v1090.Bind
         local l_CurrentCamera_6 = workspace.CurrentCamera
+        local l_HRP             = l_l_char_17_0:FindFirstChild("HumanoidRootPart")
+
         if l_LocalPlayer_0.Character then
             shared.SetCore(false, nil, true)
-            local v3915    = tick()
             local l_Folder_3 = Instance.new("Folder")
             l_Folder_3.Name   = "NoRotate"
             l_Folder_3.Parent = l_l_char_17_0
             l_l_char_17_0:SetAttribute("NoHeadFollow", true)
             local l_Character_12 = l_LocalPlayer_0.Character
 
-            v3910 = game:GetService("RunService").RenderStepped:Connect(function(v3918)
-                local v3919 = v3918 * 60
-                v3909 = v3909 + v3919
-                local v3920 = tonumber(math.ceil(v3909))
-                if v3920 >= 922 then v3920 = 2000000000 end
-                local v3921 = v3912[v3920]
+            local v3910
+            local v3909 = 0  -- frame index (increments by 1 each RenderStepped)
 
-                if v3921 and l_Bind_2.Parent and l_Character_12.Parent then
-                    if l_CurrentCamera_6.CameraType ~= Enum.CameraType.Scriptable then
-                        l_CurrentCamera_6.CameraType = Enum.CameraType.Scriptable
-                    end
-                    v3911 = v3911 + v3919
-                    if v3921 then
-                        if tick() - v3915 > 0.5 then
-                            l_CurrentCamera_6.FieldOfView = v3921.fov
-                        else
-                            local fov = l_CurrentCamera_6.FieldOfView
-                            l_CurrentCamera_6.FieldOfView = fov + (v3921.fov - fov) * 0.25
-                        end
-                    end
-                    if l_l_char_17_0:FindFirstChild("NoRotate") then
-                        if tick() - v3915 > 0.5 then
-                            l_CurrentCamera_6.CFrame = l_CurrentCamera_6.CFrame:lerp(v1090.CameraPart.CFrame, 0.9)
-                        else
-                            l_CurrentCamera_6.CFrame = l_CurrentCamera_6.CFrame:lerp(v1090.CameraPart.CFrame, 0.25)
-                        end
-                        return
+            v3910 = game:GetService("RunService").RenderStepped:Connect(function()
+                v3909 = v3909 + 1
+                local data = v3912[v3909]
+
+                if data and l_Bind_2.Parent and l_Character_12.Parent then
+                    l_CurrentCamera_6.CameraType = Enum.CameraType.Scriptable
+                    -- Apply relative CFrame + FOV — works from any position in any map
+                    if l_HRP and l_HRP.Parent then
+                        l_CurrentCamera_6.CFrame    = l_HRP.CFrame * data.CFrame
+                        l_CurrentCamera_6.FieldOfView = data.FOV
                     end
                 else
                     -- Cutscene ended → restore
@@ -744,4 +731,74 @@ do
             _EnabledAllVisuals(l_v3904_0)
         end)
     end
+end -- fireDropkick
 end
+
+-- ============================================================
+-- HITBOX
+-- ============================================================
+task.delay(1.79, function()
+    local hitbox = Instance.new("Part")
+    hitbox.Name        = "DropkickHitbox"
+    hitbox.Size        = Vector3.new(20, 20, 20)
+    hitbox.Anchored    = false
+    hitbox.CanCollide  = false
+    hitbox.Transparency = 1
+    hitbox.CFrame      = hrp.CFrame
+    hitbox.Parent      = workspace.Thrown
+
+    -- Keep hitbox welded to HRP
+    local weld = Instance.new("WeldConstraint")
+    weld.Part0  = hrp
+    weld.Part1  = hitbox
+    weld.Parent = hitbox
+
+    local fired = false
+    local conn
+    conn = hitbox.Touched:Connect(function(hit)
+        if fired then return end
+        local hitChar = game.Players:GetPlayerFromCharacter(hit.Parent)
+        if not hitChar or hitChar == player then return end
+        local targetChar = hitChar.Character or hitChar.CharacterAdded:Wait()
+        fired = true
+        conn:Disconnect()
+        hitbox:Destroy()
+
+        -- Snap ogrootcfr to where we are RIGHT NOW so the whole
+        -- sequence plays from current position, not script-start position
+        v1090.ogrootcfr = hrp.CFrame
+
+        -- Place target 3 studs in front of current position, facing back at us
+        local targetHRP = targetChar:FindFirstChild("HumanoidRootPart")
+        if targetHRP then
+            targetHRP.CFrame = v1090.ogrootcfr * CFrame.new(0, 0, -5) * CFrame.Angles(0, math.pi, 0)
+        end
+
+        -- Disable collision on every part of both characters
+        local function setNoCollision(char)
+            for _, part in ipairs(char:GetDescendants()) do
+                if part:IsA("BasePart") then
+                    part.CanCollide = false
+                end
+            end
+        end
+        setNoCollision(character)
+        setNoCollision(targetChar)
+
+        -- Anchor us for the sequence duration
+        hrp.Anchored = true
+
+        -- Play hit animation on the target using Animator6D
+        getgenv().Animator6D(113199002278564, 1, false, targetChar)
+        v1090.hit = targetChar
+        fireDropkick(targetChar)
+    end)
+
+    -- Auto-destroy after 4.87s if nobody was hit
+    task.delay(4.87, function()
+        if not fired then
+            conn:Disconnect()
+            pcall(function() hitbox:Destroy() end)
+        end
+    end)
+end)
