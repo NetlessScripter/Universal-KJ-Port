@@ -298,7 +298,7 @@ task.delay(0.30, function()
 end);
 
 task.delay(2, function()
-    humanoid.WalkSpeed = 16;
+    humanoid.WalkSpeed = 25;
 end);
 
 v12({
