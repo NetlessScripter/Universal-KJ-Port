@@ -814,7 +814,23 @@ getgenv().Animation.Completed = CompletedSignal.Event
 -- ─────────────────────────────────────────────
 --  Public API
 -- ─────────────────────────────────────────────
-getgenv().Animator6D = function(idOrInstance, speed, looped)
+-- Per-character animator tracking — keyed by character model.
+-- getgenv().currentAnimator6D is kept as a backward-compat alias for local player.
+getgenv().currentAnimator6D_chars = getgenv().currentAnimator6D_chars or {}
+
+local function getActiveAnim(char)
+    return getgenv().currentAnimator6D_chars[char]
+end
+
+local function setActiveAnim(char, anim)
+    getgenv().currentAnimator6D_chars[char] = anim
+    if char == character then
+        getgenv().currentAnimator6D = anim  -- backward compat
+    end
+end
+
+getgenv().Animator6D = function(idOrInstance, speed, looped, targetChar)
+    local char = targetChar or character  -- play on targetChar, fall back to local player
     local kfs
 
     if typeof(idOrInstance) == "Instance" then
@@ -824,13 +840,14 @@ getgenv().Animator6D = function(idOrInstance, speed, looped)
             return
         end
 
-        suppressDefaultAnims(character)
-        if getgenv().currentAnimator6D then
-            pcall(function() getgenv().currentAnimator6D:Stop(true) end)
-            getgenv().currentAnimator6D = nil
+        suppressDefaultAnims(char)
+        local prev = getActiveAnim(char)
+        if prev then
+            pcall(function() prev:Stop(true) end)
+            setActiveAnim(char, nil)
         end
 
-        local anim = AnimPlayer.new(character, kfs)
+        local anim = AnimPlayer.new(char, kfs)
         if not anim then
             warn("[Animator6D] AnimPlayer failed to build from Instance")
             return
@@ -839,12 +856,12 @@ getgenv().Animator6D = function(idOrInstance, speed, looped)
         local isLooped = looped == nil and true or looped
         if not isLooped then
             anim._completedCallback = function()
-                restoreDefaultAnims(character)
+                restoreDefaultAnims(char)
                 CompletedSignal:Fire()
             end
         end
 
-        getgenv().currentAnimator6D = anim
+        setActiveAnim(char, anim)
         anim:Play(speed or 1, looped)
 
     else
@@ -852,26 +869,25 @@ getgenv().Animator6D = function(idOrInstance, speed, looped)
             local cId = cleanId(idOrInstance)
 
             -- ── Disk cache check ──────────────────────────────────────────
-            --  If a cache file exists for this ID, build AnimPlayer directly
-            --  from the saved frames without hitting the network at all.
             local cachedFrames, cachedLoop = readAnimCache(cId)
             if cachedFrames then
-                suppressDefaultAnims(character)
-                if getgenv().currentAnimator6D then
-                    pcall(function() getgenv().currentAnimator6D:Stop(true) end)
-                    getgenv().currentAnimator6D = nil
+                suppressDefaultAnims(char)
+                local prev = getActiveAnim(char)
+                if prev then
+                    pcall(function() prev:Stop(true) end)
+                    setActiveAnim(char, nil)
                 end
 
-                local anim = AnimPlayer.fromFrames(character, cachedFrames, cachedLoop)
+                local anim = AnimPlayer.fromFrames(char, cachedFrames, cachedLoop)
                 if anim then
                     local isLooped = looped == nil and cachedLoop or looped
                     if not isLooped then
                         anim._completedCallback = function()
-                            restoreDefaultAnims(character)
+                            restoreDefaultAnims(char)
                             CompletedSignal:Fire()
                         end
                     end
-                    getgenv().currentAnimator6D = anim
+                    setActiveAnim(char, anim)
                     anim:Play(speed or 1, isLooped)
                     return
                 end
@@ -885,43 +901,45 @@ getgenv().Animator6D = function(idOrInstance, speed, looped)
                 return
             end
 
-            suppressDefaultAnims(character)
-            if getgenv().currentAnimator6D then
-                pcall(function() getgenv().currentAnimator6D:Stop(true) end)
-                getgenv().currentAnimator6D = nil
+            suppressDefaultAnims(char)
+            local prev = getActiveAnim(char)
+            if prev then
+                pcall(function() prev:Stop(true) end)
+                setActiveAnim(char, nil)
             end
 
-            local anim = AnimPlayer.new(character, fetched)
+            local anim = AnimPlayer.new(char, fetched)
             if not anim then
                 warn("[Animator6D] AnimPlayer returned nil — busting cache and retrying in 1s")
                 KFSCache[cleanId(idOrInstance)] = nil
                 task.wait(1)
-                getgenv().Animator6D(idOrInstance, speed, looped)
+                getgenv().Animator6D(idOrInstance, speed, looped, char)
                 return
             end
 
             -- ── Write disk cache ──────────────────────────────────────────
-            --  Save the successfully parsed frames so future runs skip fetch.
             writeAnimCache(cId, anim.frames, anim.looped or false)
 
             local isLooped = looped == nil and true or looped
             if not isLooped then
                 anim._completedCallback = function()
-                    restoreDefaultAnims(character)
+                    restoreDefaultAnims(char)
                     CompletedSignal:Fire()
                 end
             end
 
-            getgenv().currentAnimator6D = anim
+            setActiveAnim(char, anim)
             anim:Play(speed or 1, looped)
         end)
     end
 end
 
-getgenv().Animator6DStop = function()
-    if getgenv().currentAnimator6D then
-        pcall(function() getgenv().currentAnimator6D:Stop(true) end)
-        getgenv().currentAnimator6D = nil
+getgenv().Animator6DStop = function(targetChar)
+    local char = targetChar or character
+    local anim = getActiveAnim(char)
+    if anim then
+        pcall(function() anim:Stop(true) end)
+        setActiveAnim(char, nil)
     end
 end
 
