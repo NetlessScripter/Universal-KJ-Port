@@ -534,7 +534,7 @@ end
 
 -- TODO: Replace 0 with the KjCounter animation ID
 humanoid.WalkSpeed = 0;
-getgenv().Animator6D(136074325508428, 1, false);
+getgenv().Animator6D(130481537906821, 1, false);
 
 task.delay(2, function()
     humanoid.WalkSpeed = 25;
