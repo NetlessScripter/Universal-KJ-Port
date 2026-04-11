@@ -81,6 +81,7 @@ local v_MoveURLs = {
     ["Collateral Ruin"] = "https://raw.githubusercontent.com/NetlessScripter/Universal-KJ-Port/refs/heads/main/Collateral%20Ruin",
     ["Spiraling Storm"] = "https://raw.githubusercontent.com/NetlessScripter/Universal-KJ-Port/refs/heads/main/Spiraling%20Storm%20(W.I.P)",
     ["Stoic Bomb"]      = "https://raw.githubusercontent.com/NetlessScripter/Universal-KJ-Port/refs/heads/main/Stoic%20Bomb%20(Port)",
+    ["Five Seasons"]    = "https://raw.githubusercontent.com/NetlessScripter/Universal-KJ-Port/refs/heads/main/FiveSeasons",
 };
 
 local v5 = {};
@@ -123,9 +124,23 @@ for v8 = 1, 13 do
                 });
             end;
 
-            -- If an ult move (slots 5–8) was used, return to normal page
+            -- If an ult move (slots 5–8) was used, tween hotbar down then back up and return to normal page
             if v8 >= 5 and v8 <= 8 then
-                switchToNormalPage();
+                local tweenDown = TweenInfo.new(0.8, Enum.EasingStyle.Quad, Enum.EasingDirection.InOut);
+                local tweenUp   = TweenInfo.new(1,   Enum.EasingStyle.Quad, Enum.EasingDirection.InOut);
+                local barFrame     = l_PlayerGui_0.Bar.MagicHealth;
+                local hotbarFrame  = l_PlayerGui_0.Hotbar.Backpack;
+                local origBar      = barFrame.Position;
+                local origHotbar   = hotbarFrame.Position;
+                local offBar    = UDim2.new(origBar.X.Scale,    origBar.X.Offset,    origBar.Y.Scale    + 2, origBar.Y.Offset);
+                local offHotbar = UDim2.new(origHotbar.X.Scale, origHotbar.X.Offset, origHotbar.Y.Scale + 2, origHotbar.Y.Offset);
+                l_TweenService_0:Create(barFrame,    tweenDown, {Position = offBar}):Play();
+                l_TweenService_0:Create(hotbarFrame, tweenDown, {Position = offHotbar}):Play();
+                task.delay(0.8, function()
+                    switchToNormalPage();
+                    l_TweenService_0:Create(barFrame,    tweenUp, {Position = origBar}):Play();
+                    l_TweenService_0:Create(hotbarFrame, tweenUp, {Position = origHotbar}):Play();
+                end);
             end;
         end;
     end);
