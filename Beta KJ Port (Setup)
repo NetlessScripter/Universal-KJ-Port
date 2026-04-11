@@ -9,7 +9,7 @@ local function setupCharacter(character)
 	local head = character:WaitForChild("Head")
 
 	RunService:BindToRenderStep("CameraOffset", Enum.RenderPriority.Camera.Value - 1, function()
-		humanoid.CameraOffset = rootPart.CFrame:PointToObjectSpace(head.Position + Vector3.new(0, 1.5, 0))
+		humanoid.CameraOffset = rootPart.CFrame:PointToObjectSpace(head.Position + Vector3.new(0, 0, 0))
 	end)
 end
 
