@@ -172,6 +172,10 @@ local function FiveSeasonStartup(data)
         end)
 
         Sound6D("rbxassetid://18460952794", 2)
+        Sound6D("rbxassetid://18460863844", 2.5)
+        task.spawn(function();
+        wait(3.4)
+        Sound6D("rbxassetid://18460893321", 2.5)
     end
 
     -- ── HeatUp particle burst (visible to everyone) ──────────────────────────
