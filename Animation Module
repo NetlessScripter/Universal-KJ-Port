@@ -393,25 +393,25 @@ local function serializeFrames(frames, looped)
     return out
 end
 
--- Name → integer maps used by the disk-cache deserialization path.
--- Must be defined before deserializeFrames.
-local ESIdByName = { Linear=0, Sine=1, Quad=2, Cubic=3, Bounce=4, Back=5, Elastic=6 }
-local EDIdByName = { In=0, Out=1, InOut=2 }
+local function safeEasingStyle(name)
+    local ok, v = pcall(function() return Enum.EasingStyle[name] end)
+    return (ok and v) or Enum.EasingStyle.Linear
+end
+
+local function safeEasingDirection(name)
+    local ok, v = pcall(function() return Enum.EasingDirection[name] end)
+    return (ok and v) or Enum.EasingDirection.Out
+end
 
 local function deserializeFrames(data)
     local frames = {}
-    -- Local refs so the closure can never see a nil upvalue
-    local esLookup = ESIdByName
-    local edLookup = EDIdByName
     for i, f in ipairs(data.Frames) do
         local poses = {}
         for joint, p in pairs(f.Poses) do
-            local es = p.EasingStyle
-            local ed = p.EasingDirection
             poses[joint] = {
                 CFrame          = CFrame.new(table.unpack(p.CFrame)),
-                EasingStyle     = (esLookup and esLookup[es]) or 0,
-                EasingDirection = (edLookup and edLookup[ed]) or 1,
+                EasingStyle     = safeEasingStyle(p.EasingStyle),
+                EasingDirection = safeEasingDirection(p.EasingDirection),
             }
         end
         frames[i] = { Time = f.Time, Poses = poses }
@@ -422,7 +422,6 @@ end
 local function writeAnimCache(id, frames, looped)
     if not writefile then return end
     local ok, encoded = pcall(HttpService.JSONEncode, HttpService, {
-        Version      = CACHE_VERSION,
         ID           = id,
         KeyframeData = serializeFrames(frames, looped),
     })
@@ -430,8 +429,6 @@ local function writeAnimCache(id, frames, looped)
         pcall(writefile, getCacheFilename(id), encoded)
     end
 end
-
-local CACHE_VERSION = 2  -- bump this whenever the serialization format changes
 
 local function readAnimCache(id)
     if not readfile or not isfile then return nil, nil end
@@ -441,11 +438,6 @@ local function readAnimCache(id)
     if not ok or not raw or raw == "" then return nil, nil end
     local ok2, data = pcall(HttpService.JSONDecode, HttpService, raw)
     if not ok2 or not data then return nil, nil end
-    -- Reject cache files written by older versions of the module
-    if (data.Version or 1) < CACHE_VERSION then
-        pcall(delfile or function() end, filename)
-        return nil, nil
-    end
     if tostring(data.ID) ~= tostring(id) then return nil, nil end
     if not data.KeyframeData or not data.KeyframeData.Frames then return nil, nil end
     return deserializeFrames(data.KeyframeData)
@@ -480,8 +472,8 @@ local function parseSequence(kfs)
             if pose:IsA("Pose") and pose.Weight > 0 then
                 entry.Poses[pose.Name] = {
                     CFrame          = pose.CFrame,
-                    EasingStyle     = ESId[pose.EasingStyle]     or 0,
-                    EasingDirection = EDId[pose.EasingDirection] or 1,
+                    EasingStyle     = pose.EasingStyle,
+                    EasingDirection = pose.EasingDirection,
                 }
             end
         end
@@ -512,77 +504,84 @@ local function findMotor(name, map, lower)
 end
 
 -- ─────────────────────────────────────────────
---  Easing ID tables
---  Pre-bake Enum values → integers at module load.
---  Hot path compares plain numbers, not enum objects.
---  Style: 0=Linear 1=Sine 2=Quad 3=Cubic 4=Bounce 5=Back 6=Elastic
---  Dir:   0=In     1=Out  2=InOut
+--  Easing
 -- ─────────────────────────────────────────────
-local ESId, EDId = {}, {}
-do
-    local sl = {
-        Enum.EasingStyle.Linear, Enum.EasingStyle.Sine,   Enum.EasingStyle.Quad,
-        Enum.EasingStyle.Cubic,  Enum.EasingStyle.Bounce, Enum.EasingStyle.Back,
-        Enum.EasingStyle.Elastic,
-    }
-    for i, s in ipairs(sl) do ESId[s] = i - 1 end
-    local dl = { Enum.EasingDirection.In, Enum.EasingDirection.Out, Enum.EasingDirection.InOut }
-    for i, d in ipairs(dl) do EDId[d] = i - 1 end
-end
--- ─────────────────────────────────────────────
---  Easing  (style / direction are now integers)
---  Linear (0) is short-circuited at the call site — never enters here.
--- ─────────────────────────────────────────────
-local _cos, _sin, _pi = math.cos, math.sin, math.pi
-local function easingAlpha(alpha, style, dir)
-    if style == 1 then  -- Sine
-        if dir == 0 then return 1 - _cos(alpha * _pi * 0.5)
-        elseif dir == 1 then return _sin(alpha * _pi * 0.5)
-        else return -(_cos(_pi * alpha) - 1) * 0.5 end
-    elseif style == 2 then  -- Quad
-        if dir == 0 then return alpha * alpha
-        elseif dir == 1 then return 1 - (1 - alpha)^2
-        else return alpha < 0.5 and 2*alpha*alpha or 1 - (-2*alpha+2)^2*0.5 end
-    elseif style == 3 then  -- Cubic
-        if dir == 0 then return alpha^3
-        elseif dir == 1 then return 1 - (1 - alpha)^3
-        else return alpha < 0.5 and 4*alpha^3 or 1 - (-2*alpha+2)^3*0.5 end
-    elseif style == 4 then  -- Bounce
+local function easingAlpha(alpha, style, direction)
+    local s, d = Enum.EasingStyle, Enum.EasingDirection
+
+    if style == s.Linear then
+        return alpha
+    elseif style == s.Sine then
+        if direction == d.In then
+            return 1 - math.cos(alpha * math.pi / 2)
+        elseif direction == d.Out then
+            return math.sin(alpha * math.pi / 2)
+        else
+            return -(math.cos(math.pi * alpha) - 1) / 2
+        end
+    elseif style == s.Quad then
+        if direction == d.In then
+            return alpha * alpha
+        elseif direction == d.Out then
+            return 1 - (1 - alpha)^2
+        else
+            return alpha < 0.5 and 2*alpha*alpha or 1 - (-2*alpha+2)^2/2
+        end
+    elseif style == s.Cubic then
+        if direction == d.In then
+            return alpha^3
+        elseif direction == d.Out then
+            return 1 - (1 - alpha)^3
+        else
+            return alpha < 0.5 and 4*alpha^3 or 1 - (-2*alpha+2)^3/2
+        end
+    elseif style == s.Bounce then
         local function bounceOut(t)
-            if t < 0.36364 then return 7.5625*t*t
-            elseif t < 0.72727 then t=t-0.54545; return 7.5625*t*t+0.75
-            elseif t < 0.90909 then t=t-0.81818; return 7.5625*t*t+0.9375
-            else t=t-0.95455; return 7.5625*t*t+0.984375 end
+            if t < 1/2.75 then
+                return 7.5625*t*t
+            elseif t < 2/2.75 then
+                t = t - 1.5/2.75; return 7.5625*t*t + 0.75
+            elseif t < 2.5/2.75 then
+                t = t - 2.25/2.75; return 7.5625*t*t + 0.9375
+            else
+                t = t - 2.625/2.75; return 7.5625*t*t + 0.984375
+            end
         end
-        if dir == 1 then return bounceOut(alpha)
-        elseif dir == 0 then return 1 - bounceOut(1 - alpha)
-        else return alpha < 0.5
-            and (1 - bounceOut(1 - 2*alpha)) * 0.5
-            or  (1 + bounceOut(2*alpha - 1)) * 0.5 end
-    elseif style == 5 then  -- Back
-        local c = 1.70158
-        if dir == 0 then return (c+1)*alpha^3 - c*alpha^2
-        elseif dir == 1 then return 1 + (c+1)*(alpha-1)^3 + c*(alpha-1)^2
+        if direction == d.Out then
+            return bounceOut(alpha)
+        elseif direction == d.In then
+            return 1 - bounceOut(1 - alpha)
         else
-            local c2 = 2.5949
             return alpha < 0.5
-                and ((2*alpha)^2 * ((c2+1)*2*alpha - c2)) * 0.5
-                or  ((2*alpha-2)^2 * ((c2+1)*(2*alpha-2) + c2) + 2) * 0.5
+                and (1 - bounceOut(1 - 2*alpha)) / 2
+                or  (1 + bounceOut(2*alpha - 1)) / 2
         end
-    elseif style == 6 then  -- Elastic
-        local c = (_pi*2)/3
-        if dir == 0 then
-            return alpha == 0 and 0 or alpha == 1 and 1
-                or -(2^(10*alpha-10)) * _sin((alpha*10-10.75)*c)
-        elseif dir == 1 then
-            return alpha == 0 and 0 or alpha == 1 and 1
-                or 2^(-10*alpha) * _sin((alpha*10-0.75)*c) + 1
+    elseif style == s.Back then
+        local c = 1.70158
+        if direction == d.In then
+            return (c+1)*alpha^3 - c*alpha^2
+        elseif direction == d.Out then
+            return 1 + (c+1)*(alpha-1)^3 + c*(alpha-1)^2
         else
-            local c2 = (_pi*2)/4.5
+            local c2 = c * 1.525
+            return alpha < 0.5
+                and ((2*alpha)^2 * ((c2+1)*2*alpha - c2)) / 2
+                or  ((2*alpha-2)^2 * ((c2+1)*(2*alpha-2) + c2) + 2) / 2
+        end
+    elseif style == s.Elastic then
+        local c = (2*math.pi)/3
+        if direction == d.In then
+            return alpha == 0 and 0 or alpha == 1 and 1
+                or -(2^(10*alpha-10)) * math.sin((alpha*10-10.75)*c)
+        elseif direction == d.Out then
+            return alpha == 0 and 0 or alpha == 1 and 1
+                or 2^(-10*alpha) * math.sin((alpha*10-0.75)*c) + 1
+        else
+            local c2 = (2*math.pi)/4.5
             return alpha == 0 and 0 or alpha == 1 and 1
                 or alpha < 0.5
-                and -(2^(20*alpha-10) * _sin((20*alpha-11.125)*c2)) * 0.5
-                or  (2^(-20*alpha+10) * _sin((20*alpha-11.125)*c2)) * 0.5 + 1
+                and -(2^(20*alpha-10) * math.sin((20*alpha-11.125)*c2)) / 2
+                or  (2^(-20*alpha+10) * math.sin((20*alpha-11.125)*c2)) / 2 + 1
         end
     end
 
@@ -606,7 +605,6 @@ function AnimPlayer.new(rig, kfs)
     end
 
     self.map, self.lower = buildMotorMap(rig)
-    self.frameCount = #self.frames
     self.length     = self.frames[#self.frames].Time
     self.time       = 0
     self.speed      = 1
@@ -644,7 +642,6 @@ function AnimPlayer.fromFrames(rig, frames, looped)
     self.frames     = frames
     self.looped     = looped
     self.map, self.lower = buildMotorMap(rig)
-    self.frameCount = #frames
     self.length     = frames[#frames].Time
     self.time       = 0
     self.speed      = 1
@@ -672,35 +669,36 @@ function AnimPlayer.fromFrames(rig, frames, looped)
 end
 
 function AnimPlayer:_sampleFrame()
-    local frames     = self.frames
-    local n          = self.frameCount
-    local clamp      = math.clamp
-    local frameIndex = self.frameIndex
-    local t          = self.time
+    local frames = self.frames
+    local n      = #frames
 
-    -- O(1) amortized index advance
-    while frameIndex < n - 1 and frames[frameIndex + 1].Time <= t do
-        frameIndex += 1
+    -- Advance the tracked index forward instead of searching from index 1
+    -- every frame. This is O(1) amortized vs O(n) per frame.
+    while self.frameIndex < n - 1
+        and frames[self.frameIndex + 1].Time <= self.time do
+        self.frameIndex += 1
     end
-    self.frameIndex = frameIndex
 
-    local prevFrame = frames[frameIndex]
-    local nextFrame = frames[frameIndex + 1] or prevFrame
-    -- Cache pose tables once — avoids repeated table-field lookup in the joint loop
-    local prevPoses = prevFrame.Poses
-    local nextPoses = nextFrame.Poses
+    local prevFrame = frames[self.frameIndex]
+    local nextFrame = frames[self.frameIndex + 1] or prevFrame
 
     local segLen = nextFrame.Time - prevFrame.Time
-    local alpha  = segLen > 0 and clamp((t - prevFrame.Time) / segLen, 0, 1) or 1
+    local alpha  = segLen > 0
+        and math.clamp((self.time - prevFrame.Time) / segLen, 0, 1)
+        or  1
 
+    -- motorCache was built once in .new() — no findMotor, no table creation here
     for joint, entry in next, self.motorCache do
-        local pPose = prevPoses[joint]
-        local nPose = nextPoses[joint]
+        local pPose = prevFrame.Poses[joint]
+        local nPose = nextFrame.Poses[joint]
+
         if pPose and nPose then
-            local style = nPose.EasingStyle
-            -- Inline Linear (0) fast-path: skip function call entirely
-            local ea = style == 0 and alpha
-                    or easingAlpha(alpha, style, nPose.EasingDirection)
+            local ea = easingAlpha(
+                alpha,
+                nPose.EasingStyle     or Enum.EasingStyle.Linear,
+                nPose.EasingDirection or Enum.EasingDirection.InOut
+            )
+            -- Direct assignment — no pcall closure overhead in the hot path
             entry.motor.C0 = entry.c0 * pPose.CFrame:Lerp(nPose.CFrame, ea)
         elseif pPose then
             entry.motor.C0 = entry.c0 * pPose.CFrame
@@ -746,19 +744,13 @@ function AnimPlayer:Play(speed, looped)
     self.looped  = looped == nil and true or looped
     self.time    = 0
 
-    -- Use a unique bind name so multiple players don't collide
-    local bindName = "Animator6D_" .. tostring(self):gsub("[^%w]", "")
-    self._bindName = bindName
-
-    -- BindToRenderStep at Character+1 fires after character updates but
-    -- before the camera, giving the lowest-latency motor writes possible.
-    RunService:BindToRenderStep(bindName, Enum.RenderPriority.Character.Value + 1, function(dt)
+    self.conn = RunService.RenderStepped:Connect(function(dt)
         if not self.playing then return end
         self.time += dt * self.speed
         if self.time >= self.length then
             if self.looped then
                 self.time = self.time % self.length
-                self.frameIndex = 1
+                self.frameIndex = 1   -- reset so the index scan restarts from frame 1
             else
                 self.time = self.length
                 self:_sampleFrame()
@@ -772,10 +764,6 @@ end
 
 function AnimPlayer:Stop(restore)
     self.playing = false
-    if self._bindName then
-        RunService:UnbindFromRenderStep(self._bindName)
-        self._bindName = nil
-    end
     if self.conn then
         self.conn:Disconnect()
         self.conn = nil
