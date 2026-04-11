@@ -5,11 +5,9 @@ local player = Players.LocalPlayer
 
 local function setupCharacter(character)
 	local humanoid = character:WaitForChild("Humanoid")
-	local rootPart = character:WaitForChild("HumanoidRootPart")
-	local head = character:WaitForChild("Head")
 
 	RunService:BindToRenderStep("CameraOffset", Enum.RenderPriority.Camera.Value - 1, function()
-		humanoid.CameraOffset = rootPart.CFrame:PointToObjectSpace(head.Position + Vector3.new(0, 0, 0))
+		humanoid.CameraOffset = Vector3.new(0, 0, 0)
 	end)
 end
 
