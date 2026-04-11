@@ -81,6 +81,7 @@ local v_MoveURLs = {
     ["Spiraling Storm"] = "https://raw.githubusercontent.com/NetlessScripter/Universal-KJ-Port/refs/heads/main/Spiraling%20Storm%20(W.I.P)",
     ["Stoic Bomb"]      = "https://raw.githubusercontent.com/NetlessScripter/Universal-KJ-Port/refs/heads/main/Stoic%20Bomb%20(Port)",
     ["Five Seasons"]    = "https://raw.githubusercontent.com/NetlessScripter/Universal-KJ-Port/refs/heads/main/FiveSeasons",
+    ["20-20-20 Dropkick"] = "https://raw.githubusercontent.com/NetlessScripter/Universal-KJ-Port/refs/heads/main/DropkickSequence%20(Beta)",
 };
 
 local v5 = {};
