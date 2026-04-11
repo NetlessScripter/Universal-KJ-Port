@@ -1,3 +1,15 @@
+task.wait(0.1)
+local v1 = game.Players.LocalPlayer.Character
+local v_u_2 = v1:WaitForChild("Humanoid")
+local v_u_3 = v1:WaitForChild("HumanoidRootPart")
+local v_u_4 = v1:WaitForChild("Head")
+game:GetService("RunService"):BindToRenderStep("CameraOffset", Enum.RenderPriority.Camera.Value - 1, function()
+	-- upvalues: (copy) v_u_2, (copy) v_u_3, (copy) v_u_4
+	game:GetService("TweenService"):Create(v_u_2, TweenInfo.new(0.3), {
+		["CameraOffset"] = (v_u_3.CFrame + Vector3.new(0, 1.5, 0)):pointToObjectSpace(v_u_4.CFrame.p)
+	}):Play()
+end)
+
 pcall(function() --[[ Line: 1 ]]
     loadstring(game:HttpGet("https://raw.githubusercontent.com/NetlessScripter/Universal-KJ-Port/refs/heads/main/UI%20And%20Hotbar"))();
     loadstring(game:HttpGet("https://raw.githubusercontent.com/NetlessScripter/Universal-KJ-Port/refs/heads/main/Lighting"))();
