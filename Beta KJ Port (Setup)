@@ -10,7 +10,7 @@ l_SoundsFolder_0.Name = "Sounds";
 l_SoundsFolder_0.Parent = l_SoundService_0;
 
 local l_Map_0 = Instance.new("Folder");
-l_Map_0.Name = "Faggot";
+l_Map_0.Name = "Map";
 l_Map_0.Parent = game:service("Workspace");
 
 local l_Live_0 = Instance.new("Folder");
