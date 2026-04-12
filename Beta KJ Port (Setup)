@@ -214,13 +214,15 @@ function shared.CooldownIndicator(v11)
             v16:Destroy();
         end;
     end);
-    local v19 = nil;
-    v19 = v15:GetPropertyChangedSignal("Visible"):Connect(function()
-        if not v15.Visible then
-            l_Debris_0:AddItem(v16, 0);
-            v19:Disconnect();
-        end;
-    end);
+    if v14 <= 4 then
+        local v19 = nil;
+        v19 = v15:GetPropertyChangedSignal("Visible"):Connect(function()
+            if not v15.Visible then
+                l_Debris_0:AddItem(v16, 0);
+                v19:Disconnect();
+            end;
+        end);
+    end;
 end;
 
 shared.Fatigued = false;
@@ -661,4 +663,4 @@ jhe=game:GetService("Players").LocalPlayer.PlayerGui.Hotbar.Backpack.Hotbar["8"]
 v:Destroy()
 bb:Destroy()
 ee:Destroy()
-jhe=Destroy()
+jhe:Destroy()
