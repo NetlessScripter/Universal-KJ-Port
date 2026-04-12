@@ -340,6 +340,7 @@ do
     local l_l_bind_1_0 = l_bind_1
     local l_v3946_0    = v3946
     task.delay(4.7, function()
+    Sound6D("rbxassetid://17419337758", 3)
         l_Debris_0:AddItem(l_v3936_0, 1)
         if not l_l_bind_1_0 or not l_l_bind_1_0.Parent then return end
         l_v3946_0.floortradmillthin.hellooooo.TextureSpeed = -9
@@ -374,7 +375,6 @@ do
     if not l_bind_1 or not l_bind_1.Parent then return end
 
     -- ── Flash waves ───────────────────────────────────────────
-    Sound6D("rbxassetid://17419337758", 3)
     local v3955 = v3899.FlashWaveone:Clone()
     v3955.CFrame = l_l_char_17_Pivot_0 * CFrame.new(1.43, 1.55, -164) * CFrame.Angles(0, -1.5707963267948966, 0)
     v3955.Decal.Transparency = 0
