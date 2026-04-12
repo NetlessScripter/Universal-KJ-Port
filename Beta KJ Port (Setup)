@@ -17,6 +17,10 @@ local l_Thrown_0 = Instance.new("Folder");
 l_Thrown_0.Name = "Thrown";
 l_Thrown_0.Parent = game:service("Workspace");
 
+local l_Built_0 = Instance.new("Folder");
+l_Built_0.Name = "Built";
+l_Built_0.Parent = game:service("Workspace");
+
 local l_Players_0 = game:service("Players");
 local l_TweenService_0 = game:service("TweenService");
 local l_Debris_0 = game:service("Debris");
