@@ -8,7 +8,6 @@ Sound6D("rbxassetid://17141392976", 3)
 wait(1)
 Sound6D("rbxassetid://17141392676", 3)
 wait(1.5)
-Sound6D("rbxassetid://17141392854", 3)
 end)
 local Players = game:GetService("Players")
 local Player = Players.LocalPlayer
@@ -2519,6 +2518,7 @@ v12 = function(v1090)
                                 l_v13156_0 = l_v13147_0.Impact;
                                 l_v13147_0.Impact:SetPrimaryPartCFrame(l_v13147_0.StoicBoomEntrance.CFrame * CFrame.new(0, 2, 0));
                                 l_v13147_0.Impact.Parent = workspace.Thrown;
+                                Sound6D("rbxassetid://17141392854", 3)
                                 l_v13147_0.Impact:ScaleTo(6.300000000000001);
                                 v989({
                                     FX = l_v13147_0.Impact, 
