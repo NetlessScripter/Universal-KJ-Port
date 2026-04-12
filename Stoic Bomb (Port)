@@ -1,7 +1,7 @@
 loadstring(game:HttpGet("https://raw.githubusercontent.com/NetlessScripter/Universal-KJ-Port/refs/heads/main/Sound%20Module"))()
 task.spawn(function()
 Sound6D("rbxassetid://17149593018", 3)
-wait(0.5)
+wait(1)
 Sound6D("rbxassetid://17141392513", 3)
 wait(0.3)
 Sound6D("rbxassetid://17141392976", 3)
