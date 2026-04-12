@@ -9,6 +9,10 @@ local l_SoundsFolder_0 = Instance.new("Folder");
 l_SoundsFolder_0.Name = "Sounds";
 l_SoundsFolder_0.Parent = l_SoundService_0;
 
+local l_Map_0 = Instance.new("Folder");
+l_Map_0.Name = "Faggot";
+l_Map_0.Parent = game:service("Workspace");
+
 local l_Live_0 = Instance.new("Folder");
 l_Live_0.Name = "Live";
 l_Live_0.Parent = game:service("Workspace");
@@ -19,10 +23,6 @@ l_Thrown_0.Parent = game:service("Workspace");
 
 local l_Built_0 = Instance.new("Folder");
 l_Built_0.Name = "Built";
-l_Built_0.Parent = game:service("Workspace");
-
-local l_Built_0 = Instance.new("Folder");
-l_Built_0.Name = "Map";
 l_Built_0.Parent = game:service("Workspace");
 
 local l_Players_0 = game:service("Players");
