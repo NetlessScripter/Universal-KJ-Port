@@ -340,9 +340,9 @@ do
     local l_l_bind_1_0 = l_bind_1
     local l_v3946_0    = v3946
     task.delay(4.7, function()
-    Sound6D("rbxassetid://17419337758", 3)
         l_Debris_0:AddItem(l_v3936_0, 1)
         if not l_l_bind_1_0 or not l_l_bind_1_0.Parent then return end
+    Sound6D("rbxassetid://17419337758", 3)
         l_v3946_0.floortradmillthin.hellooooo.TextureSpeed = -9
         l_v3946_0.floortradmillthin.byeeeee.TextureSpeed   = -4
         v10:Create(l_v3946_0.floortradmillthin.byeeeee,
