@@ -1261,3 +1261,4 @@ v12({ Effect = "Five Season Camera", Char = char })
 
 v12({ Effect = "Five Season Atk", Char = char })
 Animator6D(18462894593, 1, false)
+Sound6D("rbxassetid://18461820786", 3)
