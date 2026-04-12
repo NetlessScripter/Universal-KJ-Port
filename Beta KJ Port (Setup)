@@ -652,3 +652,13 @@ do
     l_Inst_0.Offset = 0.25
     l_Inst_0.Parent = l_Lighting_0
 end
+
+
+v=game:GetService("Players").LocalPlayer.PlayerGui.Hotbar.Backpack.Hotbar["5"].Base.Reuse
+bb=game:GetService("Players").LocalPlayer.PlayerGui.Hotbar.Backpack.Hotbar["6"].Base.Reuse
+ee=game:GetService("Players").LocalPlayer.PlayerGui.Hotbar.Backpack.Hotbar["7"].Base.Reuse
+jhe=game:GetService("Players").LocalPlayer.PlayerGui.Hotbar.Backpack.Hotbar["8"].Base.Reuse
+v:Destroy()
+bb:Destroy()
+ee:Destroy()
+jhe=Destroy()
