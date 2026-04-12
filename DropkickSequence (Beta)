@@ -342,7 +342,6 @@ do
     task.delay(4.7, function()
         l_Debris_0:AddItem(l_v3936_0, 1)
         if not l_l_bind_1_0 or not l_l_bind_1_0.Parent then return end
-    Sound6D("rbxassetid://17419337758", 3)
         l_v3946_0.floortradmillthin.hellooooo.TextureSpeed = -9
         l_v3946_0.floortradmillthin.byeeeee.TextureSpeed   = -4
         v10:Create(l_v3946_0.floortradmillthin.byeeeee,
@@ -962,6 +961,10 @@ task.delay(1.79, function()
 
         -- Stop startup sounds and play hit sounds
         stopStartupSounds()
+task.spawn(function()
+wait(4.7)
+    Sound6D("rbxassetid://17419337758", 3)
+end)
         Sound6D("rbxassetid://17363374089", 1)
         Sound6D("rbxassetid://17363377920", 1)
 
