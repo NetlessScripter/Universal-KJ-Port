@@ -1000,8 +1000,6 @@ end)
             bvConn:Disconnect()
             pcall(function() bv:Destroy() end)
             pcall(function() hitbox:Destroy() end)
-            getgenv().Animator6DStop()
-            Sound6DStop()
         end
     end)
 end)
