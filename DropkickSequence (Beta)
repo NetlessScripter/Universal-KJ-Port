@@ -961,10 +961,6 @@ task.delay(1.79, function()
 
         -- Stop startup sounds and play hit sounds
         stopStartupSounds()
-task.spawn(function()
-wait(4.7)
-    Sound6D("rbxassetid://17419337758", 3)
-end)
         Sound6D("rbxassetid://17363374089", 1)
         Sound6D("rbxassetid://17363377920", 1)
 
