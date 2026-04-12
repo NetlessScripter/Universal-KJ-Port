@@ -337,6 +337,7 @@ do
     local v3946     = v3899.ImpactFloorBeams:Clone()
     v3946.CFrame    = l_l_char_17_Pivot_0 * CFrame.new(-0.969, -2.5, 5.084)
     v3946.Parent    = workspace.Thrown
+    Sound6D("rbxassetid://17419337758", 3)
     local l_l_bind_1_0 = l_bind_1
     local l_v3946_0    = v3946
     task.delay(4.7, function()
