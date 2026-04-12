@@ -45,10 +45,10 @@ local v3 = {
     ["Swift Sweep"] = 8,
     ["Collateral Ruin"] = 12,
     ["Spiraling Storm"] = 15,
-    ["Stoic Bomb"] = 0,
-    ["20-20-20 Dropkick"] = 0,
-    ["Five Seasons"] = 0,
-    ["Unlimited Flex Works"] = 0,
+    ["Stoic Bomb"] = 5,
+    ["20-20-20 Dropkick"] = 30,
+    ["Five Seasons"] = 25,
+    ["Unlimited Flex Works"] = 30,
 };
 
 local v36 = {
