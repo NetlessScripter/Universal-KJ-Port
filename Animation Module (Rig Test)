@@ -1,0 +1,1108 @@
+if getgenv().Animator6DLoadedPro then return end
+getgenv().Animator6DLoadedPro = true
+
+local Players     = game:GetService("Players")
+local RunService  = game:GetService("RunService")
+local HttpService = game:GetService("HttpService")
+local KFSProvider = pcall(function() return game:GetService("KeyframeSequenceProvider") end)
+    and game:GetService("KeyframeSequenceProvider") or nil
+
+local player    = Players.LocalPlayer
+local character = player.Character or player.CharacterAdded:Wait()
+local humanoid  = character:WaitForChild("Humanoid")
+
+-- ─────────────────────────────────────────────
+--  Cache
+-- ─────────────────────────────────────────────
+local KFSCache      = {}
+local PlaceIdCache  = {}  -- [animId] = ownerPlaceId
+
+-- ─────────────────────────────────────────────
+--  Helpers
+-- ─────────────────────────────────────────────
+local function cleanId(id)
+    return tostring(id):gsub("^rbxassetid://", ""):gsub("%s", "")
+end
+
+-- ─────────────────────────────────────────────
+--  Executor-agnostic HTTP GET
+--  Tries syn.request → http.request → request
+--  → game:HttpGet in order
+-- ─────────────────────────────────────────────
+local function httpGet(url)
+    -- syn / Synapse X
+    if syn and syn.request then
+        local ok, res = pcall(syn.request, { Url = url, Method = "GET" })
+        if ok and res and res.StatusCode == 200 then return res.Body end
+    end
+    -- http (some executors expose it this way)
+    if http and http.request then
+        local ok, res = pcall(http.request, { Url = url, Method = "GET" })
+        if ok and res and res.StatusCode == 200 then return res.Body end
+    end
+    -- generic request() (KRNL, Fluxus, etc.)
+    if request then
+        local ok, res = pcall(request, { Url = url, Method = "GET" })
+        if ok and res and res.StatusCode == 200 then return res.Body end
+    end
+    -- fallback: game:HttpGet (works if the current game has HttpEnabled)
+    local ok, body = pcall(function() return game:HttpGet(url) end)
+    if ok and body and #body > 0 then return body end
+    return nil
+end
+
+-- ─────────────────────────────────────────────
+--  Auto-lookup: find a place ID owned by the
+--  same creator as the animation asset.
+--  Result is cached so we only call the API once
+--  per animation ID.
+--
+--  How it works:
+--    1. economy API → get creator (user or group)
+--    2. games API   → get their first public place
+--    3. Return that place ID so we can spoof it
+-- ─────────────────────────────────────────────
+local function lookupOwnerPlaceId(animId)
+    if PlaceIdCache[animId] then return PlaceIdCache[animId] end
+
+    -- Step 1: asset details
+    local details = httpGet(
+        "https://economy.roblox.com/v2/assets/" .. animId .. "/details"
+    )
+    if not details then return nil end
+
+    local creatorId   = details:match('"Id":(%d+)')
+    local creatorType = details:match('"CreatorType":"(%a+)"')
+    if not creatorId then return nil end
+
+    -- Step 2: games owned by that creator
+    local gamesUrl
+    if creatorType == "Group" then
+        gamesUrl = "https://games.roblox.com/v2/groups/"
+            .. creatorId .. "/games?accessFilter=2&limit=10&sortOrder=Asc"
+    else
+        gamesUrl = "https://games.roblox.com/v2/users/"
+            .. creatorId .. "/games?accessFilter=2&limit=10&sortOrder=Asc"
+    end
+
+    local gamesBody = httpGet(gamesUrl)
+    if not gamesBody then return nil end
+
+    -- rootPlaceId lives at the universe level
+    local placeId = tonumber(gamesBody:match('"rootPlaceId":(%d+)'))
+    if not placeId then
+        -- fallback: older response shape
+        placeId = tonumber(gamesBody:match('"id":(%d+)'))
+    end
+
+    if placeId then
+        PlaceIdCache[animId] = placeId
+    end
+    return placeId
+end
+
+-- ─────────────────────────────────────────────
+--  Temporarily spoof game.PlaceId so that the
+--  internal assetdelivery request sends the
+--  correct serverplaceid, granting permission
+--  to fetch private animations.
+--  Restores the real PlaceId afterwards.
+-- ─────────────────────────────────────────────
+local function withSpoofedPlaceId(targetPlaceId, fn)
+    if not targetPlaceId then return fn() end
+
+    local original = game.PlaceId
+    local spoofed  = false
+
+    -- sethiddenproperty is available in most modern executors
+    if sethiddenproperty then
+        pcall(function()
+            sethiddenproperty(game, "PlaceId", targetPlaceId)
+            spoofed = true
+        end)
+    end
+
+    -- tiny yield so the engine propagates the new value before the fetch
+    if spoofed then task.wait(0.05) end
+
+    local result = fn()
+
+    -- always restore
+    if spoofed then
+        pcall(function() sethiddenproperty(game, "PlaceId", original) end)
+    end
+
+    return result
+end
+
+local function findKFS(obj)
+    if not obj then return nil end
+    if obj:IsA("KeyframeSequence") then return obj end
+    local direct = obj:FindFirstChildOfClass("KeyframeSequence")
+    if direct then return direct end
+    for _, d in ipairs(obj:GetDescendants()) do
+        if d:IsA("KeyframeSequence") then return d end
+    end
+    return nil
+end
+
+local function isValidKFS(kfs)
+    if not kfs or not kfs:IsA("KeyframeSequence") then return false end
+    local kf = kfs:GetKeyframes()
+    return kf and #kf > 0
+end
+
+-- ─────────────────────────────────────────────
+--  Executor HTTP helper
+--  Tries every known executor request API
+-- ─────────────────────────────────────────────
+local function execRequest(opts)
+    local fn = (typeof(request)  == "function" and request)
+            or (syn and syn.request)
+            or (http and typeof(http.request) == "function" and http.request)
+            or (http_request)
+    if not fn then return nil end
+    local ok, res = pcall(fn, opts)
+    return (ok and res) or nil
+end
+
+-- ─────────────────────────────────────────────
+--  Thread identity helpers
+--  Escalate to identity 8 (max engine level),
+--  run fn, restore original identity
+-- ─────────────────────────────────────────────
+local function withIdentity(level, fn)
+    local original
+    if getthreadidentity then
+        pcall(function() original = getthreadidentity() end)
+    end
+    if setthreadidentity then
+        pcall(setthreadidentity, level)
+    end
+    local result = fn()
+    if setthreadidentity and original then
+        pcall(setthreadidentity, original)
+    end
+    return result
+end
+
+-- ─────────────────────────────────────────────
+--  Multi-method nuclear KFS loader
+--
+--  Method 1  setthreadidentity(8) + GetObjects
+--  Method 2  request() CDN download → writefile
+--              → getcustomasset → GetObjects
+--  Method 3  setthreadidentity(6) + KFSProvider
+--  Method 4  PlaceId spoof + GetObjects × 3
+--  Method 5  Plain GetObjects × 5 retries
+--  Method 6  GC scan (getgc)
+--  Method 7  Nil instance scan (getnilinstances)
+--  Method 8  Animator warm-up + elevated re-fetch
+--  Method 9  Dummy pre-warm + final retry
+-- ─────────────────────────────────────────────
+local function loadKFS(rawId)
+    local id = cleanId(rawId)
+    if KFSCache[id] then return KFSCache[id] end
+
+    local manualPlaceId = getgenv().Animator6DPlaceId
+
+    -- shared: try GetObjects and extract a valid KFS
+    local function tryGetObjects()
+        local ok, result = pcall(function()
+            return game:GetObjects("rbxassetid://" .. id)
+        end)
+        if ok and result and result[1] then
+            local kfs = findKFS(result[1])
+                     or (result[1]:IsA("KeyframeSequence") and result[1])
+            if isValidKFS(kfs) then return kfs end
+        end
+        return nil
+    end
+
+    local function cache(kfs)
+        KFSCache[id] = kfs
+        return kfs
+    end
+
+    -- ── Method 1: identity(8) + GetObjects ────────────────────────────
+    --  Identity 8 is the highest Roblox engine level.  At this level
+    --  GetObjects has no asset-permission restrictions whatsoever.
+    do
+        local kfs = withIdentity(8, tryGetObjects)
+        if kfs then return cache(kfs) end
+    end
+
+    -- ── Method 2: Direct CDN download via executor request() ──────────
+    --  Executors inject the .ROBLOSECURITY session cookie automatically
+    --  into every request(), so the CDN authenticates us as the logged-in
+    --  user and returns the raw asset bytes regardless of place permissions.
+    --  We write them to disk, mount via getcustomasset, then GetObjects.
+    if execRequest and writefile and getcustomasset then
+        local filename = "anim6d_" .. id .. ".rbxm"
+        local endpoints = {
+            "https://assetdelivery.roblox.com/v1/asset?id="  .. id,
+            "https://assetdelivery.roblox.com/v1/assetId/"   .. id,
+            "https://assetdelivery.roblox.com/v2/assetId/"   .. id,
+        }
+        for _, url in ipairs(endpoints) do
+            local res = execRequest({
+                Url     = url,
+                Method  = "GET",
+                Headers = { ["User-Agent"] = "Roblox/WinInet" },
+            })
+            if res and res.StatusCode == 200 and res.Body and #res.Body > 100 then
+                pcall(writefile, filename, res.Body)
+                local hasFile = isfile and isfile(filename)
+                if hasFile then
+                    local localUrl = pcall(getcustomasset, filename)
+                        and getcustomasset(filename)
+                    if localUrl then
+                        local ok2, objs = pcall(function()
+                            return game:GetObjects(localUrl)
+                        end)
+                        if ok2 and objs and objs[1] then
+                            local kfs = findKFS(objs[1])
+                                     or (objs[1]:IsA("KeyframeSequence") and objs[1])
+                            if isValidKFS(kfs) then
+                                pcall(delfile or function() end, filename)
+                                return cache(kfs)
+                            end
+                        end
+                    end
+                end
+            end
+        end
+    end
+
+    -- ── Method 3: identity(6) + KeyframeSequenceProvider ──────────────
+    --  KFSProvider:GetKeyframeSequenceAsync is PluginSecurity (level 4+).
+    --  Identity 6 unlocks it cleanly in most executors.
+    if KFSProvider then
+        local kfs = withIdentity(6, function()
+            local ok, r = pcall(function()
+                return KFSProvider:GetKeyframeSequenceAsync("rbxassetid://" .. id)
+            end)
+            return (ok and isValidKFS(r)) and r or nil
+        end)
+        if kfs then return cache(kfs) end
+    end
+
+    -- ── Method 4: PlaceId spoof + GetObjects × 3 ──────────────────────
+    local ownerPlaceId = manualPlaceId or lookupOwnerPlaceId(id)
+    if ownerPlaceId then
+        local spoofDelays = { 0, 0.5, 1.5 }
+        for attempt = 1, 3 do
+            local kfs = withSpoofedPlaceId(ownerPlaceId, tryGetObjects)
+            if kfs then return cache(kfs) end
+            if attempt < 3 then task.wait(spoofDelays[attempt]) end
+        end
+    end
+
+    -- ── Method 5: Plain GetObjects × 5 retries (exp. back-off) ────────
+    local delays = { 0, 0.3, 0.7, 1.5, 3.0 }
+    for attempt = 1, 5 do
+        local kfs = tryGetObjects()
+        if kfs then return cache(kfs) end
+        if attempt < 5 then task.wait(delays[attempt]) end
+    end
+
+    -- ── Method 6: GC scan ─────────────────────────────────────────────
+    --  If the game already loaded this animation somewhere, its KFS object
+    --  may still be alive in the Lua GC heap.  Scan for it.
+    if getgc then
+        local ok, gc = pcall(getgc, true)
+        if ok and gc then
+            for _, v in ipairs(gc) do
+                if typeof(v) == "Instance"
+                    and v:IsA("KeyframeSequence")
+                    and isValidKFS(v)
+                then
+                    return cache(v)
+                end
+            end
+        end
+    end
+
+    -- ── Method 7: Nil instance scan ───────────────────────────────────
+    --  Roblox sometimes parks loaded assets in nil-parented instances.
+    if getnilinstances then
+        local ok, nils = pcall(getnilinstances)
+        if ok and nils then
+            for _, v in ipairs(nils) do
+                if typeof(v) == "Instance"
+                    and v:IsA("KeyframeSequence")
+                    and isValidKFS(v)
+                then
+                    return cache(v)
+                end
+            end
+        end
+    end
+
+    -- ── Method 8: Animator warm-up + elevated re-fetch ────────────────
+    pcall(function()
+        local anim = Instance.new("Animation")
+        anim.AnimationId = "rbxassetid://" .. id
+        local animator = humanoid:FindFirstChildOfClass("Animator")
+        if animator then pcall(function() animator:LoadAnimation(anim) end) end
+    end)
+    task.wait(0.6)
+    do
+        local kfs = withIdentity(8, function()
+            return withSpoofedPlaceId(ownerPlaceId, tryGetObjects)
+        end)
+        if kfs then return cache(kfs) end
+    end
+
+    -- ── Method 9: Dummy pre-warm + identity(8) final retry ────────────
+    pcall(function() game:GetObjects("rbxassetid://507776093") end)
+    task.wait(0.3)
+    do
+        local kfs = withIdentity(8, tryGetObjects)
+        if kfs then return cache(kfs) end
+    end
+
+    warn("[Animator6D] All 9 methods exhausted for id:", id)
+    return nil
+end
+
+-- ─────────────────────────────────────────────
+--  Disk cache helpers
+--  Serializes parsed frame data to JSON and
+--  writes to executor workspace.  On next run,
+--  if the ID matches the saved file the frames
+--  are loaded directly — no network fetch needed.
+-- ─────────────────────────────────────────────
+local function getCacheFilename(id)
+    return "anim6d_kfcache_" .. id .. ".json"
+end
+
+local function serializeFrames(frames, looped)
+    local out = { Loop = looped, Frames = {} }
+    for i, frame in ipairs(frames) do
+        local poses = {}
+        for joint, pose in pairs(frame.Poses) do
+            poses[joint] = {
+                CFrame          = { pose.CFrame:GetComponents() },
+                EasingStyle     = tostring(pose.EasingStyle):match("%.(%w+)$")     or "Linear",
+                EasingDirection = tostring(pose.EasingDirection):match("%.(%w+)$") or "Out",
+            }
+        end
+        out.Frames[i] = { Time = frame.Time, Poses = poses }
+    end
+    return out
+end
+
+local function safeEasingStyle(name)
+    local ok, v = pcall(function() return Enum.EasingStyle[name] end)
+    return (ok and v) or Enum.EasingStyle.Linear
+end
+
+local function safeEasingDirection(name)
+    local ok, v = pcall(function() return Enum.EasingDirection[name] end)
+    return (ok and v) or Enum.EasingDirection.Out
+end
+
+local function deserializeFrames(data)
+    local frames = {}
+    for i, f in ipairs(data.Frames) do
+        local poses = {}
+        for joint, p in pairs(f.Poses) do
+            poses[joint] = {
+                CFrame          = CFrame.new(table.unpack(p.CFrame)),
+                EasingStyle     = safeEasingStyle(p.EasingStyle),
+                EasingDirection = safeEasingDirection(p.EasingDirection),
+            }
+        end
+        frames[i] = { Time = f.Time, Poses = poses }
+    end
+    return frames, data.Loop
+end
+
+local function writeAnimCache(id, frames, looped)
+    if not writefile then return end
+    local ok, encoded = pcall(HttpService.JSONEncode, HttpService, {
+        ID           = id,
+        KeyframeData = serializeFrames(frames, looped),
+    })
+    if ok and encoded then
+        pcall(writefile, getCacheFilename(id), encoded)
+    end
+end
+
+local function readAnimCache(id)
+    if not readfile or not isfile then return nil, nil end
+    local filename = getCacheFilename(id)
+    if not isfile(filename) then return nil, nil end
+    local ok, raw = pcall(readfile, filename)
+    if not ok or not raw or raw == "" then return nil, nil end
+    local ok2, data = pcall(HttpService.JSONDecode, HttpService, raw)
+    if not ok2 or not data then return nil, nil end
+    if tostring(data.ID) ~= tostring(id) then return nil, nil end
+    if not data.KeyframeData or not data.KeyframeData.Frames then return nil, nil end
+    return deserializeFrames(data.KeyframeData)
+end
+
+-- ─────────────────────────────────────────────
+--  R6 motor name remapping
+-- ─────────────────────────────────────────────
+local R6Map = {
+    ["Head"]      = "Neck",
+    ["Torso"]     = "RootJoint",
+    ["Right Arm"] = "Right Shoulder",
+    ["Left Arm"]  = "Left Shoulder",
+    ["Right Leg"] = "Right Hip",
+    ["Left Leg"]  = "Left Hip",
+}
+
+-- ─────────────────────────────────────────────
+--  KeyframeSequence parser
+-- ─────────────────────────────────────────────
+local function parseSequence(kfs)
+    if typeof(kfs) == "Instance" and not kfs:IsA("KeyframeSequence") then
+        kfs = findKFS(kfs) or kfs
+    end
+    assert(kfs and kfs:IsA("KeyframeSequence"),
+        "Expected KeyframeSequence, got: " .. tostring(kfs and kfs.ClassName))
+
+    local frames = {}
+    for _, frame in ipairs(kfs:GetKeyframes()) do
+        local entry = { Time = frame.Time, Poses = {} }
+        for _, pose in ipairs(frame:GetDescendants()) do
+            if pose:IsA("Pose") and pose.Weight > 0 then
+                entry.Poses[pose.Name] = {
+                    CFrame          = pose.CFrame,
+                    EasingStyle     = pose.EasingStyle,
+                    EasingDirection = pose.EasingDirection,
+                }
+            end
+        end
+        table.insert(frames, entry)
+    end
+
+    table.sort(frames, function(a, b) return a.Time < b.Time end)
+    return frames, kfs.Loop
+end
+
+-- ─────────────────────────────────────────────
+--  Motor map
+-- ─────────────────────────────────────────────
+local function buildMotorMap(rig)
+    local map, lower = {}, {}
+    for _, m in ipairs(rig:GetDescendants()) do
+        if m:IsA("Motor6D") then
+            map[m.Name]           = m
+            lower[m.Name:lower()] = m
+        end
+    end
+    return map, lower
+end
+
+local function findMotor(name, map, lower)
+    local mapped = R6Map[name] or name
+    return map[mapped] or lower[mapped:lower()]
+end
+
+-- ─────────────────────────────────────────────
+--  Easing
+-- ─────────────────────────────────────────────
+local function easingAlpha(alpha, style, direction)
+    local s, d = Enum.EasingStyle, Enum.EasingDirection
+
+    if style == s.Linear then
+        return alpha
+    elseif style == s.Sine then
+        if direction == d.In then
+            return 1 - math.cos(alpha * math.pi / 2)
+        elseif direction == d.Out then
+            return math.sin(alpha * math.pi / 2)
+        else
+            return -(math.cos(math.pi * alpha) - 1) / 2
+        end
+    elseif style == s.Quad then
+        if direction == d.In then
+            return alpha * alpha
+        elseif direction == d.Out then
+            return 1 - (1 - alpha)^2
+        else
+            return alpha < 0.5 and 2*alpha*alpha or 1 - (-2*alpha+2)^2/2
+        end
+    elseif style == s.Cubic then
+        if direction == d.In then
+            return alpha^3
+        elseif direction == d.Out then
+            return 1 - (1 - alpha)^3
+        else
+            return alpha < 0.5 and 4*alpha^3 or 1 - (-2*alpha+2)^3/2
+        end
+    elseif style == s.Bounce then
+        local function bounceOut(t)
+            if t < 1/2.75 then
+                return 7.5625*t*t
+            elseif t < 2/2.75 then
+                t = t - 1.5/2.75; return 7.5625*t*t + 0.75
+            elseif t < 2.5/2.75 then
+                t = t - 2.25/2.75; return 7.5625*t*t + 0.9375
+            else
+                t = t - 2.625/2.75; return 7.5625*t*t + 0.984375
+            end
+        end
+        if direction == d.Out then
+            return bounceOut(alpha)
+        elseif direction == d.In then
+            return 1 - bounceOut(1 - alpha)
+        else
+            return alpha < 0.5
+                and (1 - bounceOut(1 - 2*alpha)) / 2
+                or  (1 + bounceOut(2*alpha - 1)) / 2
+        end
+    elseif style == s.Back then
+        local c = 1.70158
+        if direction == d.In then
+            return (c+1)*alpha^3 - c*alpha^2
+        elseif direction == d.Out then
+            return 1 + (c+1)*(alpha-1)^3 + c*(alpha-1)^2
+        else
+            local c2 = c * 1.525
+            return alpha < 0.5
+                and ((2*alpha)^2 * ((c2+1)*2*alpha - c2)) / 2
+                or  ((2*alpha-2)^2 * ((c2+1)*(2*alpha-2) + c2) + 2) / 2
+        end
+    elseif style == s.Elastic then
+        local c = (2*math.pi)/3
+        if direction == d.In then
+            return alpha == 0 and 0 or alpha == 1 and 1
+                or -(2^(10*alpha-10)) * math.sin((alpha*10-10.75)*c)
+        elseif direction == d.Out then
+            return alpha == 0 and 0 or alpha == 1 and 1
+                or 2^(-10*alpha) * math.sin((alpha*10-0.75)*c) + 1
+        else
+            local c2 = (2*math.pi)/4.5
+            return alpha == 0 and 0 or alpha == 1 and 1
+                or alpha < 0.5
+                and -(2^(20*alpha-10) * math.sin((20*alpha-11.125)*c2)) / 2
+                or  (2^(-20*alpha+10) * math.sin((20*alpha-11.125)*c2)) / 2 + 1
+        end
+    end
+
+    return alpha
+end
+
+-- ─────────────────────────────────────────────
+--  AnimPlayer
+-- ─────────────────────────────────────────────
+local AnimPlayer = {}
+AnimPlayer.__index = AnimPlayer
+
+function AnimPlayer.new(rig, kfs)
+    local self   = setmetatable({}, AnimPlayer)
+    self.rig     = rig
+    self.frames, self.looped = parseSequence(kfs)
+
+    if not self.frames or #self.frames == 0 then
+        warn("[Animator6D] KFS has no keyframes — asset may not have fully loaded")
+        return nil
+    end
+
+    self.map, self.lower = buildMotorMap(rig)
+    self.length     = self.frames[#self.frames].Time
+    self.time       = 0
+    self.speed      = 1
+    self.playing    = false
+    self.frameIndex = 1   -- tracked position; avoids linear search every frame
+    self.savedC0    = {}
+
+    for _, motor in pairs(self.map) do
+        self.savedC0[motor] = motor.C0
+    end
+
+    -- Pre-resolve every joint name → { motor, baseC0 } once at load time.
+    -- _sampleFrame then iterates this table with zero lookups per frame.
+    self.motorCache = {}
+    for _, frame in ipairs(self.frames) do
+        for joint in pairs(frame.Poses) do
+            if not self.motorCache[joint] then
+                local motor = findMotor(joint, self.map, self.lower)
+                if motor and self.savedC0[motor] then
+                    self.motorCache[joint] = { motor = motor, c0 = self.savedC0[motor] }
+                end
+            end
+        end
+    end
+
+    return self
+end
+
+-- Builds an AnimPlayer directly from pre-deserialized frames, bypassing
+-- parseSequence entirely. Used when loading from disk cache.
+function AnimPlayer.fromFrames(rig, frames, looped)
+    if not frames or #frames == 0 then return nil end
+    local self      = setmetatable({}, AnimPlayer)
+    self.rig        = rig
+    self.frames     = frames
+    self.looped     = looped
+    self.map, self.lower = buildMotorMap(rig)
+    self.length     = frames[#frames].Time
+    self.time       = 0
+    self.speed      = 1
+    self.playing    = false
+    self.frameIndex = 1
+    self.savedC0    = {}
+
+    for _, motor in pairs(self.map) do
+        self.savedC0[motor] = motor.C0
+    end
+
+    self.motorCache = {}
+    for _, frame in ipairs(self.frames) do
+        for joint in pairs(frame.Poses) do
+            if not self.motorCache[joint] then
+                local motor = findMotor(joint, self.map, self.lower)
+                if motor and self.savedC0[motor] then
+                    self.motorCache[joint] = { motor = motor, c0 = self.savedC0[motor] }
+                end
+            end
+        end
+    end
+
+    return self
+end
+
+function AnimPlayer:_sampleFrame()
+    local frames = self.frames
+    local n      = #frames
+
+    -- Advance the tracked index forward instead of searching from index 1
+    -- every frame. This is O(1) amortized vs O(n) per frame.
+    while self.frameIndex < n - 1
+        and frames[self.frameIndex + 1].Time <= self.time do
+        self.frameIndex += 1
+    end
+
+    local prevFrame = frames[self.frameIndex]
+    local nextFrame = frames[self.frameIndex + 1] or prevFrame
+
+    local segLen = nextFrame.Time - prevFrame.Time
+    local alpha  = segLen > 0
+        and math.clamp((self.time - prevFrame.Time) / segLen, 0, 1)
+        or  1
+
+    -- motorCache was built once in .new() — no findMotor, no table creation here
+    for joint, entry in next, self.motorCache do
+        local pPose = prevFrame.Poses[joint]
+        local nPose = nextFrame.Poses[joint]
+
+        if pPose and nPose then
+            local ea = easingAlpha(
+                alpha,
+                nPose.EasingStyle     or Enum.EasingStyle.Linear,
+                nPose.EasingDirection or Enum.EasingDirection.InOut
+            )
+            -- Direct assignment — no pcall closure overhead in the hot path
+            entry.motor.C0 = entry.c0 * pPose.CFrame:Lerp(nPose.CFrame, ea)
+        elseif pPose then
+            entry.motor.C0 = entry.c0 * pPose.CFrame
+        elseif nPose then
+            entry.motor.C0 = entry.c0 * nPose.CFrame
+        end
+    end
+end
+
+-- ─────────────────────────────────────────────
+--  TimePosition get / set
+--  Works whether the animation is playing or
+--  paused.  Setting jumps instantly to that
+--  pose without interrupting playback state.
+-- ─────────────────────────────────────────────
+function AnimPlayer:GetTimePosition()
+    return self.time
+end
+
+function AnimPlayer:SetTimePosition(t)
+    -- Clamp to [0, length]
+    self.time = math.clamp(tonumber(t) or 0, 0, self.length)
+
+    -- Reset the tracked frame index so _sampleFrame searches from scratch
+    -- instead of assuming the index is still valid after the jump.
+    self.frameIndex = 1
+    local frames = self.frames
+    local n = #frames
+    -- Fast-forward frameIndex to the correct segment for the new time
+    while self.frameIndex < n - 1
+        and frames[self.frameIndex + 1].Time <= self.time do
+        self.frameIndex += 1
+    end
+
+    -- Apply the pose immediately (visible even while paused)
+    self:_sampleFrame()
+end
+
+function AnimPlayer:Play(speed, looped)
+    if self.playing then return end
+    self.playing = true
+    self.speed   = speed or 1
+    self.looped  = looped == nil and true or looped
+    self.time    = 0
+
+    self.conn = RunService.RenderStepped:Connect(function(dt)
+        if not self.playing then return end
+        self.time += dt * self.speed
+        if self.time >= self.length then
+            if self.looped then
+                self.time = self.time % self.length
+                self.frameIndex = 1   -- reset so the index scan restarts from frame 1
+            else
+                self.time = self.length
+                self:_sampleFrame()
+                self:Stop(true)
+                return
+            end
+        end
+        self:_sampleFrame()
+    end)
+end
+
+function AnimPlayer:Stop(restore)
+    self.playing = false
+    if self.conn then
+        self.conn:Disconnect()
+        self.conn = nil
+    end
+    if restore then
+        for motor, c0 in pairs(self.savedC0) do
+            pcall(function() motor.C0 = c0 end)
+        end
+    end
+    if self._completedCallback then
+        pcall(self._completedCallback)
+    end
+end
+
+-- ─────────────────────────────────────────────
+--  Suppress / restore default animations
+-- ─────────────────────────────────────────────
+local function suppressDefaultAnims(char)
+    local animScript = char:FindFirstChild("Animate")
+    if animScript then animScript.Disabled = true end
+    local hum = char:FindFirstChildOfClass("Humanoid")
+    if hum then
+        for _, track in ipairs(hum:GetPlayingAnimationTracks()) do
+            track:Stop(0)
+        end
+    end
+end
+
+local function restoreDefaultAnims(char)
+    local animScript = char:FindFirstChild("Animate")
+    if animScript then
+        animScript.Disabled = false
+    end
+end
+
+-- ─────────────────────────────────────────────
+--  Animation.Completed signal
+--  Fires when a non-looped animation finishes.
+--  Usage:
+--    getgenv().Animation.Completed:Connect(function()
+--        print("done!")
+--    end)
+-- ─────────────────────────────────────────────
+local CompletedSignal = Instance.new("BindableEvent")
+getgenv().Animation = getgenv().Animation or {}
+getgenv().Animation.Completed = CompletedSignal.Event
+
+-- ─────────────────────────────────────────────
+--  Public API
+-- ─────────────────────────────────────────────
+-- Per-character animator tracking — keyed by character model.
+-- getgenv().currentAnimator6D is kept as a backward-compat alias for local player.
+getgenv().currentAnimator6D_chars = getgenv().currentAnimator6D_chars or {}
+
+local function getActiveAnim(char)
+    return getgenv().currentAnimator6D_chars[char]
+end
+
+local function setActiveAnim(char, anim)
+    getgenv().currentAnimator6D_chars[char] = anim
+    if char == character then
+        getgenv().currentAnimator6D = anim  -- backward compat
+    end
+end
+
+-- ─────────────────────────────────────────────
+--  Rig-mode helpers
+--  Used when Animator6D is called with a rig
+--  (Model / Humanoid / AnimationController) as
+--  arg1 and an animation asset ID as arg2.
+-- ─────────────────────────────────────────────
+local function isRigTarget(inst)
+    return inst:IsA("Model")
+        or inst:IsA("Humanoid")
+        or inst:IsA("AnimationController")
+end
+
+local function resolveRigModel(inst)
+    if inst:IsA("Model") then return inst end
+    return inst.Parent  -- Humanoid / AnimationController → parent Model
+end
+
+getgenv().Animator6D = function(idOrInstance, speed, looped, targetChar)
+
+    -- ── Rig / AnimationController mode ──────────────────────────────────
+    -- Signature : Animator6D(rigOrController, animId, animSpeed, isLooped)
+    -- Detected  : arg1 is a Model/Humanoid/AnimationController AND
+    --             arg2 is an animation asset ID (string or number).
+    -- Returns   : { SetTime(t), Stop() }  — available immediately; calls
+    --             are buffered if the KFS hasn't finished loading yet.
+    if typeof(idOrInstance) == "Instance" and isRigTarget(idOrInstance)
+       and (typeof(speed) == "string" or typeof(speed) == "number") then
+
+        local rigInst  = idOrInstance
+        local rawId    = tostring(speed)
+        local animId   = rawId:find("^%d+$")
+                         and ("rbxassetid://" .. rawId)
+                         or  rawId
+        local animSpeed = looped or 1
+        local isLooped  = targetChar   -- 4th positional arg maps to looped flag
+
+        local rigModel = resolveRigModel(rigInst)
+
+        -- Pending-buffer controller: SetTime / Stop may be called before
+        -- the async KFS load completes; we queue them here.
+        local ctrl = { _anim = nil, _stopped = false, _pendingTime = nil }
+
+        function ctrl:SetTime(t)
+            if self._anim then
+                pcall(function() self._anim:SetTimePosition(t) end)
+            else
+                self._pendingTime = t
+            end
+        end
+
+        function ctrl:Stop()
+            self._stopped = true
+            if self._anim then
+                pcall(function() self._anim:Stop(false) end)
+            end
+        end
+
+        task.spawn(function()
+            local kfs = loadKFS(cleanId(animId))
+            if not kfs or ctrl._stopped then return end
+
+            -- Primary path: Motor6D-driven AnimPlayer (same system as player anims)
+            local anim = AnimPlayer.new(rigModel, kfs)
+
+            if not anim then
+                -- Fallback: rig has no Motor6Ds — use Roblox's native LoadAnimation
+                local controller = rigInst:IsA("AnimationController") and rigInst
+                               or  rigInst:IsA("Humanoid") and rigInst
+                               or  (rigModel and (
+                                       rigModel:FindFirstChildOfClass("AnimationController")
+                                    or rigModel:FindFirstChildOfClass("Humanoid")))
+                if not controller then
+                    warn("[Animator6D] Rig mode: no Motor6Ds and no Animator found in", rigModel)
+                    return
+                end
+                local animObj = Instance.new("Animation")
+                animObj.AnimationId = animId
+                local track = controller:LoadAnimation(animObj)
+                if isLooped ~= nil then track.Looped = isLooped end
+                track:Play()
+                track:AdjustSpeed(animSpeed)
+                -- Wrap native track into the same interface shape as AnimPlayer
+                local wrapper = {}
+                function wrapper:SetTimePosition(t) track.TimePosition = t end
+                function wrapper:Stop(_) track:Stop() end
+                ctrl._anim = wrapper
+                if ctrl._pendingTime then
+                    pcall(function() track.TimePosition = ctrl._pendingTime end)
+                    ctrl._pendingTime = nil
+                end
+                if ctrl._stopped then pcall(function() track:Stop() end) end
+                return
+            end
+
+            -- AnimPlayer path
+            if isLooped ~= nil then anim.looped = isLooped end
+            ctrl._anim = anim
+            anim:Play(animSpeed, isLooped)
+
+            if ctrl._pendingTime then
+                pcall(function() anim:SetTimePosition(ctrl._pendingTime) end)
+                ctrl._pendingTime = nil
+            end
+            if ctrl._stopped then
+                pcall(function() anim:Stop(false) end)
+            end
+        end)
+
+        return ctrl
+    end
+
+    -- ── Standard player-character mode (original behaviour below) ───────
+    local char = targetChar or character  -- play on targetChar, fall back to local player
+    local kfs
+
+    if typeof(idOrInstance) == "Instance" then
+        kfs = findKFS(idOrInstance)
+        if not kfs then
+            warn("[Animator6D] No KeyframeSequence found in provided Instance")
+            return
+        end
+
+        suppressDefaultAnims(char)
+        local prev = getActiveAnim(char)
+        if prev then
+            pcall(function() prev:Stop(true) end)
+            setActiveAnim(char, nil)
+        end
+
+        local anim = AnimPlayer.new(char, kfs)
+        if not anim then
+            warn("[Animator6D] AnimPlayer failed to build from Instance")
+            return
+        end
+
+        local isLooped = looped == nil and true or looped
+        if not isLooped then
+            anim._completedCallback = function()
+                restoreDefaultAnims(char)
+                CompletedSignal:Fire()
+            end
+        end
+
+        setActiveAnim(char, anim)
+        anim:Play(speed or 1, looped)
+
+    else
+        task.spawn(function()
+            local cId = cleanId(idOrInstance)
+
+            -- ── Disk cache check ──────────────────────────────────────────
+            local cachedFrames, cachedLoop = readAnimCache(cId)
+            if cachedFrames then
+                suppressDefaultAnims(char)
+                local prev = getActiveAnim(char)
+                if prev then
+                    pcall(function() prev:Stop(true) end)
+                    setActiveAnim(char, nil)
+                end
+
+                local anim = AnimPlayer.fromFrames(char, cachedFrames, cachedLoop)
+                if anim then
+                    local isLooped = looped == nil and cachedLoop or looped
+                    if not isLooped then
+                        anim._completedCallback = function()
+                            restoreDefaultAnims(char)
+                            CompletedSignal:Fire()
+                        end
+                    end
+                    setActiveAnim(char, anim)
+                    anim:Play(speed or 1, isLooped)
+                    return
+                end
+                -- cache was corrupt / unusable — fall through to fresh fetch
+            end
+
+            -- ── Fresh fetch ───────────────────────────────────────────────
+            local fetched = loadKFS(idOrInstance)
+            if not fetched then
+                warn("[Animator6D] All fetch methods failed for id:", idOrInstance)
+                return
+            end
+
+            suppressDefaultAnims(char)
+            local prev = getActiveAnim(char)
+            if prev then
+                pcall(function() prev:Stop(true) end)
+                setActiveAnim(char, nil)
+            end
+
+            local anim = AnimPlayer.new(char, fetched)
+            if not anim then
+                warn("[Animator6D] AnimPlayer returned nil — busting cache and retrying in 1s")
+                KFSCache[cleanId(idOrInstance)] = nil
+                task.wait(1)
+                getgenv().Animator6D(idOrInstance, speed, looped, char)
+                return
+            end
+
+            -- ── Write disk cache ──────────────────────────────────────────
+            writeAnimCache(cId, anim.frames, anim.looped or false)
+
+            local isLooped = looped == nil and true or looped
+            if not isLooped then
+                anim._completedCallback = function()
+                    restoreDefaultAnims(char)
+                    CompletedSignal:Fire()
+                end
+            end
+
+            setActiveAnim(char, anim)
+            anim:Play(speed or 1, looped)
+        end)
+    end
+end
+
+getgenv().Animator6DStop = function(targetChar)
+    local char = targetChar or character
+    local anim = getActiveAnim(char)
+    if anim then
+        pcall(function() anim:Stop(true) end)
+        setActiveAnim(char, nil)
+    end
+end
+
+-- ─────────────────────────────────────────────
+--  TimePosition public API
+--
+--  Two equivalent ways to use it:
+--
+--  Functional:
+--    Animator6DSetTime(1.25)         -- jump to 1.25 s
+--    print(Animator6DGetTime())      -- read current position
+--
+--  Property-style (same table as Animation.Completed):
+--    Animation.TimePosition = 1.25   -- jump to 1.25 s
+--    print(Animation.TimePosition)   -- read current position
+-- ─────────────────────────────────────────────
+getgenv().Animator6DSetTime = function(t)
+    local anim = getgenv().currentAnimator6D
+    if anim then
+        anim:SetTimePosition(t)
+    else
+        warn("[Animator6D] Animator6DSetTime: no animation is currently active")
+    end
+end
+
+getgenv().Animator6DGetTime = function()
+    local anim = getgenv().currentAnimator6D
+    if anim then
+        return anim:GetTimePosition()
+    end
+    return 0
+end
+
+-- Expose TimePosition as a property on the Animation table via a metatable.
+-- Animation.Completed (a BindableEvent.Event) is already set on the raw
+-- table, so we proxy through __index / __newindex for TimePosition only.
+do
+    local raw = getgenv().Animation
+    local proxy = setmetatable({}, {
+        __index = function(_, k)
+            if k == "TimePosition" then
+                return getgenv().Animator6DGetTime()
+            end
+            return raw[k]
+        end,
+        __newindex = function(_, k, v)
+            if k == "TimePosition" then
+                getgenv().Animator6DSetTime(v)
+            else
+                raw[k] = v
+            end
+        end,
+    })
+    getgenv().Animation = proxy
+end
