@@ -886,6 +886,35 @@ getgenv().Animator6D = function(idOrInstance, speed, looped, targetChar)
             end
         end
 
+        -- Returns the current playback position in seconds.
+        -- Falls back to the pending-seek value (or 0) if the KFS hasn't loaded yet.
+        function ctrl:GetTime()
+            if self._anim then
+                local ok, t = pcall(function() return self._anim:GetTimePosition() end)
+                return (ok and type(t) == "number") and t or 0
+            end
+            return self._pendingTime or 0
+        end
+
+        -- Proxy so callers can use ctrl.TimePosition exactly like a native AnimationTrack:
+        --   ctrl.TimePosition = 3          -- seek
+        --   local t = ctrl.TimePosition    -- read
+        local ctrlProxy = setmetatable({}, {
+            __index = function(_, k)
+                if k == "TimePosition" then
+                    return ctrl:GetTime()
+                end
+                return ctrl[k]
+            end,
+            __newindex = function(_, k, v)
+                if k == "TimePosition" then
+                    ctrl:SetTime(v)
+                else
+                    ctrl[k] = v
+                end
+            end,
+        })
+
         task.spawn(function()
             local kfs = loadKFS(cleanId(animId))
             if not kfs or ctrl._stopped then return end
@@ -913,6 +942,7 @@ getgenv().Animator6D = function(idOrInstance, speed, looped, targetChar)
                 -- Wrap native track into the same interface shape as AnimPlayer
                 local wrapper = {}
                 function wrapper:SetTimePosition(t) track.TimePosition = t end
+                function wrapper:GetTimePosition() return track.TimePosition end
                 function wrapper:Stop(_) track:Stop() end
                 ctrl._anim = wrapper
                 if ctrl._pendingTime then
@@ -937,7 +967,7 @@ getgenv().Animator6D = function(idOrInstance, speed, looped, targetChar)
             end
         end)
 
-        return ctrl
+        return ctrlProxy
     end
 
     -- ── Standard player-character mode (original behaviour below) ───────
