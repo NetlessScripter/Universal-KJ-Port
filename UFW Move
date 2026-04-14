@@ -1,0 +1,2072 @@
+--[[
+    Unlimited Flex Works VFX — Extracted Standalone Script
+    All required variables, functions, and dependencies are self-contained below.
+    Animation check has been fully removed.
+    Entry point is at the bottom.
+]]
+
+-- ─── Animation Module ─────────────────────────────────────────────────────────
+loadstring(game:HttpGet("https://raw.githubusercontent.com/NetlessScripter/Universal-KJ-Port/refs/heads/main/Animation%20Module%20(Rig%20Test)"))()
+
+-- ─── Core Services ────────────────────────────────────────────────────────────
+local Players        = game:GetService("Players")
+local RunService     = game:GetService("RunService")
+local TweenService   = game:GetService("TweenService")
+local Debris         = game:GetService("Debris")
+local StarterGui     = game:GetService("StarterGui")
+
+local LocalPlayer    = Players.LocalPlayer
+
+-- ─── v12 Stub (CamShake passthrough used at sequence end) ────────────────────
+-- The original interpreter exposes v12 for recursive effect calls.
+-- Only the CamShake variant is invoked inside this VFX block.
+local function v12(v1090)
+    if v1090.Effect == "Camshake" then
+        -- Minimal camshake via viewport offset
+        local intensity = v1090.Intensity or 10
+        local duration  = v1090.Last      or 1
+        local camera    = workspace.CurrentCamera
+        local elapsed   = 0
+        local conn
+        conn = RunService.RenderStepped:Connect(function(dt)
+            elapsed = elapsed + dt
+            if elapsed >= duration then
+                conn:Disconnect()
+                return
+            end
+            local t = 1 - (elapsed / duration)
+            camera.CFrame = camera.CFrame
+                * CFrame.new(
+                    math.random(-intensity, intensity) * 0.001 * t,
+                    math.random(-intensity, intensity) * 0.001 * t,
+                    0
+                )
+        end)
+    end
+end
+
+-- ─── shared stubs ─────────────────────────────────────────────────────────────
+-- shared.loop: runs fn on Heartbeat (optionally capped to fps).
+-- Returns a disconnect function; calling it from inside fn stops the loop.
+local function v780(fn, fps)
+    local conn
+    local elapsed = 0
+    conn = RunService.Heartbeat:Connect(function(dt)
+        if fps then
+            elapsed = elapsed + dt
+            if elapsed < (1 / fps) then return end
+            elapsed = 0
+        end
+        fn()
+    end)
+    local function disconnect()
+        if conn then conn:Disconnect(); conn = nil end
+    end
+    return disconnect
+end
+shared.loop = v780
+
+shared.SetCore = function(enabled)
+    pcall(function()
+        StarterGui:SetCore("TopbarEnabled", enabled)
+    end)
+end
+
+shared.BackpackVisibility = function(visible)
+    pcall(function()
+        StarterGui:SetCoreGuiEnabled(Enum.CoreGuiType.Backpack, visible)
+    end)
+end
+
+-- ─── v819: floating debris manager ───────────────────────────────────────────
+-- Pass a part (v781); nearby objects in workspace.Thrown will orbit it and
+-- play a pop sound + destroy themselves when they drift out of range.
+local v95 = Random.new()
+local function v102(a, b) return v95:NextNumber(a, b) end
+
+local function v819(v781)
+    local v783 = {}
+    local v785 = OverlapParams.new()
+    v785.FilterType = Enum.RaycastFilterType.Include
+    v785.FilterDescendantsInstances = { workspace.Thrown }
+    local v787
+    v787 = shared.loop(function()
+        for v788, v789 in pairs(v783) do
+            if not v789.Parent then
+                v783[v788] = nil
+            else
+                local l_Parent_5 = v789.Parent
+                if (l_Parent_5.Position - v781.Position).Magnitude > v781.Size.Z or not v781.Parent then
+                    v783[v788] = nil
+                    v789:Destroy()
+                    local snd = {
+                        SoundId = ({ "rbxassetid://3932587334", "rbxassetid://3932587669",
+                                     "rbxassetid://4307213273", "rbxassetid://4307214211" })[math.random(1, 4)],
+                        Volume        = v95:NextNumber(0.3, 0.7),
+                        PlaybackSpeed = v95:NextNumber(1.2, 1.7),
+                        Parent        = l_Parent_5,
+                    }
+                    if shared.sfx then shared.sfx(snd):Play() end
+                else
+                    v789.Position = v789.Position + Vector3.new(v102(-0.001, 0.001), 0.005, v102(-0.001, 0.001))
+                end
+            end
+        end
+        if not v781.Parent then
+            return v787()
+        end
+    end, 60)
+    return v783
+end
+
+
+local function RunUnlimitedFlexWorksVFX(v1090)
+
+    -- ── RB Rig at far-away position (pre-load) ──────────────────────────────
+    local v29112 = game.ReplicatedStorage.Resources.UFW.RB:Clone()
+    v29112:SetPrimaryPartCFrame(CFrame.new(1000000, 1000000, 1000000))
+    v29112.Parent = workspace.Thrown
+    v29112:ScaleTo(7)
+    local v29113 = getgenv().Animator6D(v29112.AnimationController, game.ReplicatedStorage.Resources.UFW.lastthing.AnimationId, 1, false)
+    v29113:SetTime(1.4)
+    Debris:AddItem(v29112, 3)
+
+    -- ── Invisible preload anchor part ───────────────────────────────────────
+    local l_Part_36 = Instance.new("Part")
+    l_Part_36.Anchored    = true
+    l_Part_36.Transparency = 1
+    l_Part_36.CanCollide  = false
+    l_Part_36.CanQuery    = false
+    l_Part_36.CanTouch    = false
+    l_Part_36.CFrame      = CFrame.new(40000, 40000, 40000)
+    l_Part_36.Parent      = workspace.Thrown
+    Debris:AddItem(l_Part_36, 10)
+
+    local l_l_Part_36_0 = l_Part_36
+    spawn(function()
+        local v29116 = {}
+        for _, v29118 in pairs(game.ReplicatedStorage.Resources.UFW.vfx.Pillar.Preload:GetDescendants()) do
+            if v29118:IsA("Decal") and v29118.Texture ~= "" and not table.find(v29116, v29118.Texture) then
+                table.insert(v29116, v29118.Texture)
+            end
+        end
+        for _, v29120 in pairs(v29116) do
+            local l_Decal_900 = Instance.new("Decal")
+            l_Decal_900.Parent = l_l_Part_36_0
+            Debris:AddItem(l_Decal_900, 3)
+            l_Decal_900.Texture = v29120
+            task.wait(0.0065)
+        end
+    end)
+
+    -- ── HideUlt accessory (hides character during ult) ──────────────────────
+    local l_Character_5 = LocalPlayer.Character
+    local l_Accessory_5 = Instance.new("Accessory")
+    l_Accessory_5.Name = "HideUlt"
+    l_Accessory_5:SetAttribute("Force", true)
+    l_Accessory_5.Parent = l_Character_5
+    Debris:AddItem(l_Accessory_5, 28)
+
+    -- ── UFW Resource references ─────────────────────────────────────────────
+    local l_UFW_2         = game.ReplicatedStorage.Resources.UFW
+    local l_RunService_1  = RunService
+    local l_TweenService_66 = TweenService
+    game:GetService("KeyframeSequenceProvider") -- referenced in original, kept for parity
+
+    -- ── KJ Dialogue renderer ────────────────────────────────────────────────
+    local v29127 = (function()
+        local _CollectionService = game:GetService("CollectionService")
+        local _TextService       = game:GetService("TextService")
+        local _LocalPlayer       = Players.LocalPlayer
+
+        local function getColor(p8, p9)
+            local v11 = p9[1].Value
+            for v12 = 1, #p9 - 1 do
+                if p9[v12].Time <= p8 and p8 <= p9[v12 + 1].Time then
+                    local v13 = p9[v12]
+                    local v14 = p9[v12 + 1]
+                    local v15 = (p8 - v13.Time) / (v14.Time - v13.Time)
+                    return v13.Value:lerp(v14.Value, v15)
+                end
+            end
+            return v11
+        end
+
+        local function _endLetters(p16)
+            for _, v17 in p16:GetChildren() do
+                if v17.Name == "letter" then
+                    v17:SetAttribute("Ending", true)
+                    game.TweenService:Create(v17, TweenInfo.new(0.5, Enum.EasingStyle.Quad, Enum.EasingDirection.In), {
+                        Position             = v17.Position + UDim2.new(0, 0, 0, 50),
+                        TextTransparency     = 1,
+                        TextStrokeTransparency = 1,
+                    }):Play()
+                    game.Debris:AddItem(v17, 0.5)
+                end
+            end
+        end
+
+        local function _speak(p19, p20)
+            local v21    = p20 or _LocalPlayer
+            local v_u_22 = _LocalPlayer.PlayerGui:FindFirstChild(v21.Name .. "KJUI") or game:GetService("ReplicatedStorage").Resources.UFW.TekrinnDialogue.KJDialogue:Clone()
+            local v_u_24 = 0
+            local v_u_25 = 0
+            local v26    = 0
+
+            if v_u_22:GetAttribute("Created") then
+                v_u_22:SetAttribute("Created", os.clock())
+            else
+                local v_u_27 = v_u_22:WaitForChild("Holder"):WaitForChild("Template")
+                local v28    = v_u_22.Holder
+                v28.Position = v28.Position - UDim2.new(0, 0, 0, #_CollectionService:GetTagged("KJUI") * 100)
+                v_u_27:WaitForChild("ImageLabel").Position         = v_u_27:WaitForChild("ImageLabel").Position - UDim2.new(0, 0, 0, 100)
+                v_u_27:WaitForChild("ImageLabel").ImageTransparency = 1
+                v_u_27:WaitForChild("Name").Position               = v_u_27:WaitForChild("Name").Position - UDim2.new(0, 0, 0, 100)
+                v_u_27:WaitForChild("Name").TextTransparency       = 1
+                v_u_27:WaitForChild("Name").TextStrokeTransparency = 1
+                game.TweenService:Create(v_u_27:WaitForChild("ImageLabel"), TweenInfo.new(1, Enum.EasingStyle.Quint, Enum.EasingDirection.Out), {
+                    Position         = v_u_27:WaitForChild("ImageLabel").Position + UDim2.new(0, 0, 0, 100),
+                    ImageTransparency = 0,
+                }):Play()
+                game.TweenService:Create(v_u_27:WaitForChild("Name"), TweenInfo.new(1, Enum.EasingStyle.Quint, Enum.EasingDirection.Out), {
+                    Position               = v_u_27:WaitForChild("Name").Position + UDim2.new(0, 0, 0, 100),
+                    TextTransparency       = 0,
+                    TextStrokeTransparency = 0,
+                }):Play()
+                task.spawn(function()
+                    v_u_22:SetAttribute("Created", os.clock())
+                    repeat task.wait() until os.clock() - v_u_22:GetAttribute("Created") > 5 or not v_u_22.Parent
+                    v_u_22.Name = "deleting"
+                    _endLetters(v_u_22.Holder.Template)
+                    game.TweenService:Create(v_u_27:WaitForChild("ImageLabel"), TweenInfo.new(1, Enum.EasingStyle.Quint, Enum.EasingDirection.In), {
+                        Position         = v_u_27:WaitForChild("ImageLabel").Position - UDim2.new(0, 0, 0, 100),
+                        ImageTransparency = 1,
+                    }):Play()
+                    game.TweenService:Create(v_u_27:WaitForChild("Name"), TweenInfo.new(1, Enum.EasingStyle.Quint, Enum.EasingDirection.In), {
+                        Position               = v_u_27:WaitForChild("Name").Position - UDim2.new(0, 0, 0, 100),
+                        TextTransparency       = 1,
+                        TextStrokeTransparency = 1,
+                    }):Play()
+                    task.delay(1, function() v_u_22:Destroy() end)
+                end)
+            end
+
+            v_u_22.Parent  = _LocalPlayer.PlayerGui
+            v_u_22.Enabled = true
+            v_u_22.Name    = v21.Name .. "KJUI"
+            v_u_22:AddTag("KJUI")
+            v_u_22:WaitForChild("Holder"):WaitForChild("Template"):WaitForChild("Name").Text = v21.Name
+
+            local v32 = false
+            for _, v33 in pairs(p19) do
+                if v33.HigherUp then
+                    game:GetService("TweenService"):Create(v_u_22.Holder, TweenInfo.new(0.2), {
+                        Position = UDim2.new(0.5, 0, 0.965, 0),
+                    }):Play()
+                    v32 = true
+                end
+            end
+            if not v32 and v_u_22.Holder.Position ~= UDim2.new(0.5, 0, 1, 0) then
+                game:GetService("TweenService"):Create(v_u_22.Holder, TweenInfo.new(1), {
+                    Position = UDim2.new(0.5, 0, 1, 0),
+                }):Play()
+            end
+
+            _endLetters(v_u_22.Holder.Template)
+
+            -- First pass: measure total width
+            for _, v34 in p19 do
+                local v36 = v34.Bold and Enum.Font.SourceSansBold or (v34.Italic and Enum.Font.SourceSansItalic or Enum.Font.SourceSans)
+                for _, v37 in string.split(v34.Text, "") do
+                    v_u_24 = v_u_24 + _TextService:GetTextSize(v37, 25, v36, Vector2.new(100, 100)).X
+                end
+            end
+
+            -- Second pass: spawn letters
+            for _, v_u_38 in p19 do
+                local v40 = v_u_38.Bold and Enum.Font.SourceSansBold or (v_u_38.Italic and Enum.Font.SourceSansItalic or Enum.Font.SourceSans)
+                for _, v41 in string.split(v_u_38.Text, "") do
+                    local v42    = _TextService:GetTextSize(v41, 25, v40, Vector2.new(100, 100))
+                    local v_u_43 = Instance.new("TextLabel")
+                    v_u_43.AnchorPoint             = Vector2.new(0, 0.5)
+                    v_u_43.Position                = UDim2.new(0.5, v_u_25 - v_u_24 / 2 // 1, 0.5, 10)
+                    v_u_43.Size                    = UDim2.new(0, v42.X, 0, v42.Y)
+                    v_u_43.Text                    = v41
+                    v_u_43.Name                    = "letter"
+                    v_u_43.Font                    = v40
+                    v_u_43.TextSize                = 25
+                    v_u_43.BackgroundTransparency  = 1
+                    v_u_43.TextStrokeColor3        = v_u_38.TextStrokeColor
+                    v_u_43.TextStrokeTransparency  = 1
+                    v_u_43.TextTransparency        = 1
+                    v_u_43.Parent                  = v_u_22.Holder.Template
+                    local _capPos = v_u_25
+                    task.delay(v26, function()
+                        local v44 = os.clock()
+                        repeat
+                            local v46 = math.min((os.clock() - v44) / 0.35, 1)
+                            local v48 = math.min((os.clock() - v44) / v_u_38.Shake.Lifetime, 1)
+                            local v49 = not v_u_38.Shake.Enabled
+                                and UDim2.new(0, 0, 0, 0)
+                                or  UDim2.new(
+                                        0, math.random(-v_u_38.Shake.Intensity, v_u_38.Shake.Intensity) * (1 - v48),
+                                        0, math.random(-v_u_38.Shake.Intensity, v_u_38.Shake.Intensity) * (1 - v48)
+                                    )
+                            local v53 = 1 - (math.pow(v46 - 1, 3) * 2.70158 + 1 + math.pow(v46 - 1, 2) * 1.70158)
+                            v_u_43.TextStrokeTransparency = (1 - v46) ^ 10
+                            v_u_43.TextTransparency       = v53
+                            v_u_43.TextSize               = 25 + 25 * v53
+                            v_u_43.TextColor3             = getColor(v46, v_u_38.Color.Keypoints)
+                            v_u_43.Position               = UDim2.new(0.5, _capPos - v_u_24 / 2 // 1, 0.5, 0) + v49
+                            task.wait()
+                        until math.max(0.35, v_u_38.Shake.Lifetime) < (os.clock() - v44)
+                            or not v_u_43
+                            or not v_u_43:IsDescendantOf(v_u_22)
+                            or v_u_43:GetAttribute("Ending")
+                        if v_u_43 then
+                            v_u_43.TextStrokeTransparency = 0
+                            v_u_43.TextTransparency       = 0
+                            v_u_43.TextSize               = 25
+                            v_u_43.TextColor3             = v_u_38.Color.Keypoints[#v_u_38.Color.Keypoints].Value
+                            v_u_43.Position               = UDim2.new(0.5, _capPos - v_u_24 / 2 // 1, 0.5, 0)
+                        end
+                    end)
+                    v26    = v26 + v_u_38.TypeSpeed
+                    v_u_25 = v_u_25 + v42.X
+                end
+            end
+        end
+
+        local function Speak(p57, p58)
+            _speak(p58, p57)
+        end
+
+        return { Speak = Speak }
+    end)()
+
+    local l_LocalPlayer_1 = LocalPlayer
+
+    -- ── Cleanup tracker ─────────────────────────────────────────────────────
+    local v29129 = {}
+
+    -- ── Dialogue tables ─────────────────────────────────────────────────────
+    local v29130 = {}
+    v29130[1] = {
+        {
+            Text            = "Because with this... ",
+            Color           = ColorSequence.new({
+                ColorSequenceKeypoint.new(0,   Color3.fromRGB(0,   0,   0)),
+                ColorSequenceKeypoint.new(0.5, Color3.fromRGB(255, 17,  17)),
+                ColorSequenceKeypoint.new(1,   Color3.fromRGB(255, 255, 255)),
+            }),
+            TextStrokeColor = Color3.new(0, 0, 0),
+            Bold            = false,
+            Italic          = false,
+            Shake           = { Enabled = false, Intensity = 1, Lifetime = 2 },
+            TypeSpeed       = 0.03,
+        },
+        {
+            Text            = "IT'S OVER!",
+            Color           = ColorSequence.new({
+                ColorSequenceKeypoint.new(0, Color3.fromRGB(0,   0,   0)),
+                ColorSequenceKeypoint.new(1, Color3.fromRGB(255, 17,  17)),
+            }),
+            TextStrokeColor = Color3.new(0, 0, 0),
+            Bold            = true,
+            Italic          = true,
+            Shake           = { Enabled = true, Intensity = 5, Lifetime = 1 },
+            TypeSpeed       = 0.04,
+        },
+    }
+    v29130[2] = {
+        {
+            Text            = "KJ's... ",
+            Color           = ColorSequence.new({
+                ColorSequenceKeypoint.new(0,   Color3.fromRGB(0,   0,   0)),
+                ColorSequenceKeypoint.new(0.5, Color3.fromRGB(255, 0,   0)),
+                ColorSequenceKeypoint.new(1,   Color3.fromRGB(255, 255, 255)),
+            }),
+            TextStrokeColor = Color3.new(0, 0, 0),
+            Bold            = false,
+            Italic          = false,
+            Shake           = { Enabled = false, Intensity = 1, Lifetime = 2 },
+            TypeSpeed       = 0.04,
+        },
+        {
+            Text            = "21 SERIES.",
+            Color           = ColorSequence.new({
+                ColorSequenceKeypoint.new(0,   Color3.fromRGB(0,   0,   0)),
+                ColorSequenceKeypoint.new(0.2, Color3.fromRGB(255, 17,  17)),
+                ColorSequenceKeypoint.new(0.4, Color3.fromRGB(255, 255, 127)),
+                ColorSequenceKeypoint.new(0.6, Color3.fromRGB(85,  170, 255)),
+                ColorSequenceKeypoint.new(0.8, Color3.fromRGB(255, 0,   255)),
+                ColorSequenceKeypoint.new(1,   Color3.fromRGB(255, 255, 255)),
+            }),
+            TextStrokeColor = Color3.fromRGB(85, 0, 0),
+            Bold            = true,
+            Italic          = true,
+            Shake           = { Enabled = true, Intensity = 4, Lifetime = 1 },
+            TypeSpeed       = 0.05,
+        },
+    }
+
+    -- ── impactFrame helper ──────────────────────────────────────────────────
+    local function v29141(v29131, v29132, v29133, _)
+        local l_v29132_0 = v29132
+        local v29136    = v29132 - 1
+        local v29137    = true
+        local v29140    = shared.loop(function()
+            if not v29137 or v29133 < l_v29132_0 then
+                if v29131:FindFirstChild(v29133) then
+                    v29131[v29133].ImageTransparency = 1
+                end
+                v29137 = false
+                return
+            else
+                local l_v29131_FirstChild_0 = v29131:FindFirstChild((tostring(v29136)))
+                if l_v29131_FirstChild_0 then
+                    l_v29131_FirstChild_0.ImageTransparency = 1
+                end
+                local l_v29131_FirstChild_1 = v29131:FindFirstChild((tostring(l_v29132_0)))
+                if l_v29131_FirstChild_1 then
+                    l_v29131_FirstChild_1.ImageTransparency = 0
+                    l_v29131_FirstChild_1.Size = UDim2.new(1, 0, 1, 0)
+                end
+                v29136    = l_v29132_0
+                l_v29132_0 = l_v29132_0 + 1
+                return
+            end
+        end, 34)
+        task.delay(5, function()
+            if v29140 then v29140() end
+        end)
+    end
+
+    -- ── Char / Humanoid references ──────────────────────────────────────────
+    local l_char_65     = v1090.char
+    local l_Humanoid_29 = l_char_65:FindFirstChild("Humanoid")
+    local l_RootPart_0  = l_Humanoid_29.RootPart
+
+    -- ── Cutscene frames ──────────────────────────────────────────────────────
+    local _csFrames = (function()
+        local ok, result = pcall(function()
+            return loadstring(game:HttpGet(
+                "https://raw.githubusercontent.com/NetlessScripter/Universal-KJ-Port/refs/heads/main/UFW%20Cutscene"
+            ))()
+        end)
+        if not ok then warn("[UFW] Cutscene fetch failed:", result) end
+        return (ok and type(result) == "table" and result) or {}
+    end)()
+    local _csT0 = nil
+
+    local function _getCSFrame(t)
+        if #_csFrames == 0 then return nil end
+        local lo, hi = 1, #_csFrames
+        if t <= _csFrames[lo].t then return _csFrames[lo] end
+        if t >= _csFrames[hi].t then return _csFrames[hi] end
+        while lo < hi - 1 do
+            local mid = math.floor((lo + hi) / 2)
+            if _csFrames[mid].t <= t then lo = mid else hi = mid end
+        end
+        return _csFrames[lo]
+    end
+
+    -- ── ImpactFrames GUI ────────────────────────────────────────────────────
+    local v29151 = l_UFW_2.ImpactFrames:Clone()
+    v29151.Parent = l_LocalPlayer_1.PlayerGui
+    for _, v29153 in v29151:GetChildren() do
+        v29153.Size             = UDim2.new(0, 0, 0, 1)
+        v29153.ImageTransparency = 0
+    end
+    for _, v29155 in l_UFW_2.Flexworks:GetChildren() do
+        local v29156     = v29155:Clone()
+        v29156.Size      = UDim2.new(0, 0, 0, 1)
+        v29156.Position  = UDim2.new(0, 0, 0, 0)
+        v29156.Parent    = v29151
+        task.delay(2, function() v29156:Destroy() end)
+    end
+
+    -- ── Upvalue aliases ─────────────────────────────────────────────────────
+    local v29157 = nil
+    local v29158 = nil
+    local l_l_UFW_2_0         = l_UFW_2
+    local l_l_LocalPlayer_1_0 = l_LocalPlayer_1
+    local l_l_char_65_0       = l_char_65
+    local l_l_RunService_1_0  = l_RunService_1
+    local l_l_RootPart_0_0    = l_RootPart_0
+    local l_l_TweenService_66_0 = l_TweenService_66
+    local l_v29141_0          = v29141
+
+    -- ── Camera CFrame recorder ───────────────────────────────────────────────
+    -- Frames are stored relative to the player's HumanoidRootPart so that
+    -- the cutscene follows wherever the player is at playback time, not the
+    -- world position where it was originally recorded.
+    local _camRec = { frames = {}, conn = nil, t0 = nil }
+
+    do
+        local l_v29157_0, l_v29158_0 = v29157, v29158
+        task.spawn(function()
+            local v29169    = l_l_UFW_2_0.Flash:Clone()
+            local l_Viewport_0 = v29169.Flashup.Viewport.Viewport
+            local v29171    = Instance.new("Camera", l_Viewport_0)
+            l_Viewport_0.CurrentCamera = v29171
+            v29169.Parent   = l_l_LocalPlayer_1_0.PlayerGui
+            l_l_char_65_0.Archivable = true
+            l_v29157_0      = l_l_char_65_0:Clone()
+            l_v29157_0.PrimaryPart.Anchored = true
+            for _, v29173 in pairs(l_v29157_0:GetDescendants()) do
+                if v29173.ClassName:find("Script") then v29173:Destroy() end
+            end
+            for _, v29175 in l_v29157_0:GetChildren() do
+                if v29175:IsA("BasePart") then v29175.Anchored = true end
+            end
+            for _, v29177 in pairs(l_v29157_0:GetDescendants()) do
+                if v29177:IsA("Highlight") then v29177:Destroy("") end
+            end
+            l_v29157_0.Parent = l_Viewport_0.Body
+            -- Animation will be started via Animator6D at sync point below
+
+            local v29182 = l_l_RunService_1_0.RenderStepped:Connect(function()
+                local _vf = _csFrames[1]
+                if _vf then
+                    v29171.CFrame = l_v29157_0.HumanoidRootPart.CFrame:ToWorldSpace(_vf.cf)
+                end
+                for _, v29179 in l_v29157_0:GetChildren() do
+                    if v29179:IsA("BasePart") then
+                        local l_l_l_char_65_0_FirstChild_0 = l_l_char_65_0:FindFirstChild(v29179.Name)
+                        if l_l_l_char_65_0_FirstChild_0 then
+                            v29179.CFrame = l_l_l_char_65_0_FirstChild_0.CFrame
+                        end
+                    end
+                end
+                local l_Position_107 = (l_v29157_0.Head.CFrame * CFrame.new(0.2, 0.2, -0.5)).Position
+                l_Position_107 = v29171:WorldToScreenPoint(l_Position_107)
+                v29169.EyeFlash.Position = UDim2.fromScale(
+                    (l_Position_107.X - 0.5) * l_Viewport_0.AbsoluteSize.Y / l_Viewport_0.AbsoluteSize.X + 0.5,
+                    (l_Position_107.Y - 0.5) * l_Viewport_0.AbsoluteSize.X / l_Viewport_0.AbsoluteSize.Y + 0.5
+                )
+            end)
+
+            task.delay(0.2, function()
+                v29169.Flashup.Viewport.BackgroundColor3 = Color3.new(0, 0, 0)
+                v29169.Flashup.Viewport.Viewport.ImageColor3 = Color3.fromRGB(20, 20, 20)
+                l_l_TweenService_66_0:Create(v29169.Flashup.Viewport, TweenInfo.new(1, Enum.EasingStyle.Quad), {BackgroundColor3 = Color3.new(1, 1, 1)}):Play()
+                l_l_TweenService_66_0:Create(v29169.Flashup.Viewport.Viewport, TweenInfo.new(0.8, Enum.EasingStyle.Quad), {ImageColor3 = Color3.new(1, 1, 1)}):Play()
+                v29169.EyeFlash.Visible = true
+                l_l_TweenService_66_0:Create(v29169.EyeFlash, TweenInfo.new(0.5, Enum.EasingStyle.Quad), {Rotation = 90}):Play()
+                task.wait(0.2); v29169.EyeFlash.Visible = false
+                task.wait(0.025); v29169.EyeFlash.Size = UDim2.fromScale(0.2, 0.2); v29169.EyeFlash.Visible = true
+                task.wait(0.025); v29169.EyeFlash.Visible = false
+                task.wait(0.025); v29169.EyeFlash.Size = UDim2.fromScale(0.25, 0.25); v29169.EyeFlash.Visible = true
+                task.wait(0.05);  v29169.EyeFlash.Visible = false
+                task.wait(0.05);  v29169.EyeFlash.Size = UDim2.fromScale(0.1, 0.1); v29169.EyeFlash.Visible = true
+                task.wait(0.05);  v29169.EyeFlash.Visible = false
+            end)
+
+            local v29183 = TweenInfo.new(2.5, Enum.EasingStyle.Elastic, Enum.EasingDirection.Out)
+            l_l_TweenService_66_0:Create(v29169.Flashup, v29183, {Size = UDim2.new(1, 0, 0.3, 0)}):Play()
+            l_l_TweenService_66_0:Create(v29171, TweenInfo.new(2, Enum.EasingStyle.Exponential, Enum.EasingDirection.Out), {FieldOfView = 120}):Play()
+            task.wait(2)
+            l_l_TweenService_66_0:Create(v29171, TweenInfo.new(1.7, Enum.EasingStyle.Exponential, Enum.EasingDirection.InOut), {FieldOfView = 70}):Play()
+            l_l_TweenService_66_0:Create(v29169.Flashup, TweenInfo.new(1, Enum.EasingStyle.Exponential, Enum.EasingDirection.In), {Size = UDim2.new(1, 0, 1, 0)}):Play()
+            task.wait(1)
+            v29182:Disconnect()
+            task.delay(0.05, function()
+                shared.SetCore(false)
+                l_v29141_0(v29151, 1, 2, 0.07)
+                v29151.Frame.Visible = true
+                task.wait(0.05)
+                v29151.Frame.Visible = false
+            end)
+            l_v29157_0.Parent = workspace
+            v29169:Destroy()
+            for _, v29185 in l_v29157_0:GetChildren() do
+                if v29185:IsA("BasePart") and v29185.Name ~= "HumanoidRootPart" then
+                    v29185.Anchored = false
+                end
+            end
+        end)
+
+        v29127.Speak(l_char_65, v29130[1])
+        task.wait(3)
+
+        getgenv().Animator6D(l_l_UFW_2_0.User.AnimationId, 1, false)
+        getgenv().Animator6DSetTime(3)
+        warn("sync")
+
+        local l_HumanoidRootPart_21 = l_v29157_0.HumanoidRootPart
+        local v29187 = CFrame.new(math.random(4000, 100000), 0, 0)
+        table.insert(v29129, l_v29157_0)
+        workspace.CurrentCamera.CameraType = Enum.CameraType.Scriptable
+
+        local l_l_HumanoidRootPart_21_0 = l_HumanoidRootPart_21
+        local l_v29187_0                = v29187
+        _csT0 = tick()
+
+        table.insert(v29129, (l_RunService_1.RenderStepped:Connect(function()
+            l_l_HumanoidRootPart_21_0.CFrame = l_v29187_0
+            local frame = _getCSFrame(tick() - _csT0)
+            if frame then
+                workspace.CurrentCamera.CFrame      = l_RootPart_0.CFrame:ToWorldSpace(frame.cf)
+                workspace.CurrentCamera.FieldOfView = frame.fov
+            end
+        end)))
+
+        -- ── Second ImpactFrames / Flexworks / Arms / BG ─────────────────────
+        local v29193 = l_UFW_2.ImpactFrames:Clone()
+        v29193.Parent = l_LocalPlayer_1.PlayerGui
+        local v29194 = l_UFW_2.Flexworks:Clone()
+        v29194.Vignette.Visible = true
+        v29194.Parent = l_LocalPlayer_1.PlayerGui
+        table.insert(v29129, v29194)
+        table.insert(v29129, v29193)
+
+        local v29195 = l_UFW_2.CloneArms:Clone()
+        v29195["Right Arm"].Color = l_v29157_0["Right Arm"].Color
+        v29195["Left Arm"].Color  = l_v29157_0["Left Arm"].Color
+        local v29196 = v29195["Right Arm"]["Right Arm"]
+        local v29197 = v29195["Left Arm"]["Left Arm"]
+        local l_Shirt_1 = l_v29157_0:FindFirstChildWhichIsA("Shirt")
+        if l_Shirt_1 then l_Shirt_1:Clone().Parent = v29195 end
+        v29195.Parent  = l_v29157_0
+        v29196.Part0   = l_v29157_0["Right Arm"]
+        v29196.Parent  = l_v29157_0["Right Arm"]
+        v29197.Part0   = l_v29157_0["Left Arm"]
+        v29197.Parent  = l_v29157_0["Left Arm"]
+        table.insert(v29129, v29195)
+
+        local v29199 = l_UFW_2.BG:Clone()
+        v29199:PivotTo(v29187 * CFrame.Angles(0, math.pi / 2, 0))
+        v29199.light2.SpotLight.Brightness = 20
+        v29199.Parent = workspace
+        game.Lighting.ClockTime = 22
+        v29199.Floor.Decal.Transparency  = 0.99
+        v29199.Wall2.Decal.Transparency  = 0.99
+        table.insert(v29129, v29199)
+
+        local l_ColorCorrectionEffect_6 = Instance.new("ColorCorrectionEffect")
+        l_ColorCorrectionEffect_6.Brightness = -0.15
+        l_ColorCorrectionEffect_6.Parent     = game.Lighting
+        table.insert(v29129, l_ColorCorrectionEffect_6)
+
+        -- ── Library utilities ────────────────────────────────────────────────
+        local v29201 = {}
+        v29201.__index = v29201
+        -- ── All modules inlined below (no require calls remain) ─────────────
+        -- ── Bezier ───────────────────────────────────────────────────────────
+        local _Bezier = (function()
+            local function _id(p) return p end
+            return function(x1,y1,x2,y2)
+                if not(x1 and y1 and x2 and y2) then error("Need 4 numbers",0) end
+                if x1<0 or x1>1 or x2<0 or x2>1 then error("x values must be in [0,1]",0) end
+                if x1==y1 and x2==y2 then return _id end
+                local S={}
+                for i=0,10 do local t=i/10; S[i]=(((1-3*x2+3*x2)*t+(3*x2-6*x1))*t+3*x1)*t end
+                return function(p)
+                    if x1==y1 and x2==y2 then return _id end
+                    if p==0 or p==1 then return p end
+                    local hi,lo=1,0
+                    while hi~=10 and S[hi]<=p do lo=lo+0.1; hi=hi+1 end
+                    local li=hi-1
+                    local t=lo+(p-S[li])/(S[li+1]-S[li])/10
+                    local d=3*(1-3*x2+3*x1)*t*t+2*(3*x2-6*x1)*t+3*x1
+                    if d>=0.001 then
+                        for _=0,3 do
+                            local dd=3*(1-3*x2+3*x1)*t*t+2*(3*x2-6*x1)*t+3*x1
+                            t=t-((((1-3*x2+3*x1)*t+(3*x2-6*x1))*t+3*x1)*t-p)/dd
+                        end
+                    elseif d~=0 then
+                        local hi2,itr,err=lo+0.1,0,0; t=nil
+                        while math.abs(err)>1e-7 and itr<10 do
+                            t=lo+(hi2-lo)/2
+                            err=(((1-3*x2+3*x1)*t+(3*x2-6*x1))*t+3*x1)*t-p
+                            if err>0 then hi2=t else lo=t end; itr=itr+1
+                        end
+                    end
+                    return (((1-3*y2+3*y1)*t+(3*y2-6*y1))*t+3*y1)*t
+                end
+            end
+        end)()
+
+        -- ── Maid ─────────────────────────────────────────────────────────────
+        local _Maid = (function()
+            local M={ClassName="Maid"}
+            M.new=function() return setmetatable({_tasks={}},M) end
+            M.isMaid=function(v) return type(v)=="table" and v.ClassName=="Maid" end
+            M.__index=function(t,k) return M[k] or t._tasks[k] end
+            M.__newindex=function(t,k,v)
+                if M[k]~=nil then error(("'%s' is reserved"):format(tostring(k)),2) end
+                local tasks=t._tasks; local old=tasks[k]
+                if old~=v then
+                    tasks[k]=v
+                    if old then
+                        if type(old)=="function" then old()
+                        elseif typeof(old)=="RBXScriptConnection" then old:Disconnect()
+                        elseif old.Destroy then old:Destroy()
+                        elseif old.destroy then old:destroy() end
+                    end
+                end
+            end
+            M.giveTask=function(self,task_)
+                if not task_ then error("Task cannot be false or nil",2) end
+                local i=#self._tasks+1; self[i]=task_; return i
+            end
+            M.give=function(self,item)
+                return item, self:giveTask(item)
+            end
+            M.doCleaning=function(self)
+                local tasks=self._tasks
+                for k,v in pairs(tasks) do
+                    if typeof(v)=="RBXScriptConnection" then tasks[k]=nil; v:Disconnect() end
+                end
+                local k,v=next(tasks)
+                while v~=nil do
+                    tasks[k]=nil
+                    if type(v)=="function" then v()
+                    elseif typeof(v)=="RBXScriptConnection" then v:Disconnect()
+                    elseif v.Destroy then v:Destroy()
+                    elseif v.destroy then v:destroy() end
+                    k,v=next(tasks)
+                end
+            end
+            M.destroy=M.doCleaning; M.clean=M.doCleaning
+            return M
+        end)()
+
+        -- ── FastSpawn ─────────────────────────────────────────────────────────
+        local _FastSpawn=function(fn,...)
+            assert(type(fn)=="function")
+            local args,n={...},select("#",...)
+            local ev=Instance.new("BindableEvent")
+            ev.Event:Connect(function() fn(table.unpack(args,1,n)) end)
+            ev:Fire(); ev:Destroy()
+        end
+
+        -- ── TweenFunctions (easing styles) ────────────────────────────────────
+        local _TF=(function()
+            local b=_Bezier
+            local function id(p) return p end
+            local v12=b(0.4,0,0.6,1); local v13=b(0.4,0,0.2,1); local v14=b(0.4,0,1,1)
+            local v15=b(0,0,0.2,1);   local v16=b(0.8,0,0.2,1); local v17=b(0.9,0.1,1,0.2)
+            local v18=b(0.1,0.9,0.2,1);local v19=b(0.7,0,1,0.5);local v20=b(0.2,0,0.38,0.9)
+            local v21=b(0.4,0.14,0.3,1);local v22=b(0,0,0.38,0.9);local v23=b(0,0,0.3,1)
+            local v24=b(0.2,0,1,0.9);  local v25=b(0.4,0.14,1,1); local v26=b(0.07,0.95,0,1)
+            local function sm(p) return p*p*(3-2*p) end
+            local function smr(p) return p*p*p*(p*(6*p-15)+10) end
+            local function sp(p) return -math.exp(-6.9*p)*math.cos(-20.106192982975*p)+1 end
+            local function ssp(p) return -math.exp(-7.5*p)*math.cos(-10.053096491487*p)+1 end
+            local function wig(p) local v=p*math.pi; return 1-(math.sin(p*math.pi*0.5)+math.sin(v)*(math.cos(p*math.pi)+1)/2) end
+            local function rb(p) local a=1-p; return 1-(math.sin(a*math.pi*0.5)+math.sin(a*math.pi)*(math.cos(a*math.pi)+1)/2) end
+            local function inQ(p) return p*p end
+            local function outQ(p) return p*(2-p) end
+            local function inC(p) return p*p*p end
+            local function outC(p) local v=1-p; return 1-v*v*v end
+            local function inQrt(p) return p*p*p*p end
+            local function outQrt(p) local v=p-1; return 1-v*v*v*v end
+            local function inQnt(p) return p*p*p*p*p end
+            local function outQnt(p) local v=p-1; return v*v*v*v*v+1 end
+            local function inBk(p) return p*p*(3*p-2) end
+            local function outBk(p) return (p-1)*(p-1)*(p*2+p-1)+1 end
+            local function inSn(p) return 1-math.cos(p*1.5707963267949) end
+            local function outSn(p) return math.sin(p*1.5707963267949) end
+            local function inEl(p)
+                local v=(p*0.96380736418812-1)*8
+                return math.exp(v)*p*0.96380736418812*math.sin(4*p*0.96380736418812)*1.8752275007429
+            end
+            local function outEl(p)
+                local v=8*(0.96380736418812-0.96380736418812*p-1)
+                return 1+math.exp(v)*0.96380736418812*(p-1)*math.sin(3.85522945675248*(1-p))*1.8752275007429
+            end
+            local function inEx(p) return p*p*math.exp(4*(p-1)) end
+            local function outEx(p) return 1-(1-p)*(1-p)/math.exp(4*p) end
+            local function inCr(p) return -(math.sqrt(1-p*p)-1) end
+            local function outCr(p) local v=p-1; return math.sqrt(1-v*v) end
+            local function outBn(p)
+                if p<0.36363636363636 then return 7.5625*p*p
+                elseif p<0.72727272727273 then return 3+p*(11*p-12)*0.6875
+                elseif p<0.909090909 then return 6+p*(11*p-18)*0.6875
+                else return 7.875+p*(11*p-21)*0.6875 end
+            end
+            local function inBn(p)
+                if p>0.63636363636364 then local v=p-1; return 1-v*v*7.5625
+                elseif p>0.272727272727273 then return (11*p-7)*(11*p-3)/-16
+                elseif p>0.090909090909091 then return (11*(4-11*p)*p-3)/16
+                else return p*(11*p-1)*-0.6875 end
+            end
+            local function addStyle(t,name,fn,fn2)
+                local f2=fn2 or fn
+                t[name]={In=fn,Out=f2,InOut=fn,OutIn=fn}
+            end
+            local t={}
+            addStyle(t,"Linear",id); addStyle(t,"Smooth",sm); addStyle(t,"Smoother",smr)
+            addStyle(t,"Spring",sp); addStyle(t,"SoftSpring",ssp)
+            addStyle(t,"RidiculousWiggle",wig); addStyle(t,"RevBack",rb)
+            addStyle(t,"Sharp",v12); addStyle(t,"Acceleration",v14); addStyle(t,"Standard",v13)
+            addStyle(t,"Deceleration",v15); addStyle(t,"FabricStandard",v16)
+            addStyle(t,"FabricAccelerate",v17); addStyle(t,"FabricDecelerate",v18)
+            addStyle(t,"UWPAccelerate",v19); addStyle(t,"MozillaCurve",v26)
+            addStyle(t,"StandardProductive",v20); addStyle(t,"StandardExpressive",v21)
+            addStyle(t,"EntranceProductive",v22); addStyle(t,"EntranceExpressive",v23)
+            addStyle(t,"ExitProductive",v24); addStyle(t,"ExitExpressive",v25)
+            t["Quad"]={In=inQ,Out=outQ,InOut=function(p) return p<0.5 and 2*p*p or 2*(2-p)*p-1 end,OutIn=function(p) if p<0.5 then local v=p*2;return v*(2-v)/2 else return p*p/2+0.5 end end}
+            t["Cubic"]={In=inC,Out=outC,InOut=function(p) if p<0.5 then return 4*p*p*p end local v=p-1;return 1+4*v*v*v end,OutIn=function(p) if p<0.5 then local v=1-p*2;return(1-v*v*v)/2 else return p*p*p/2+0.5 end end}
+            t["Quart"]={In=inQrt,Out=outQrt,InOut=function(p) if p<0.5 then local v=p*p;return 8*v*v else local v=p-1;return 1-8*v*v*v*v end end,OutIn=function(p) if p<0.5 then return(1-p*p*p*p)/2 else return p*p*p*p/2+0.5 end end}
+            t["Quint"]={In=inQnt,Out=outQnt,InOut=function(p) if p<0.5 then return 16*p*p*p*p*p end local v=p-1;return 16*v*v*v*v*v+1 end,OutIn=function(p) if p<0.5 then return(p*p*p*p*p+1)/2 else return p*p*p*p*p/2+0.5 end end}
+            t["Back"]={In=inBk,Out=outBk,InOut=function(p) if p<0.5 then return 2*p*p*(6*p-2) else return 1+2*(p-1)*(p-1)*(6*p-4) end end,OutIn=function(p) if p<0.5 then local v=p*2;return((v-1)*(v-1)*(v*2+v-1)+1)/2 else return p*p*(3*p-2)/2+0.5 end end}
+            t["Sine"]={In=inSn,Out=outSn,InOut=function(p) return(1-math.cos(math.pi*p))/2 end,OutIn=function(p) if p<0.5 then return math.sin(p*math.pi)/2 else return(1-math.cos((p*2-1)*1.5707963267949))/2+0.5 end end}
+            t["Bounce"]={In=inBn,Out=outBn,InOut=function(p) if p<0.5 then return inBn(p*2)/2 else return outBn(p*2-1)/2+0.5 end end,OutIn=function(p) if p<0.5 then return outBn(p*2)/2 else return inBn(p*2-1)/2+0.5 end end}
+            t["Elastic"]={In=inEl,Out=outEl,InOut=function(p) if p<0.5 then local v=8*(1.92761472837624*p-1);return math.exp(v)*0.96380736418812*p*math.sin(7.71045891350496*p)*1.8752275007429 else local v=8*(0.96380736418812*(2-2*p)-1);return 1+math.exp(v)*0.96380736418812*(p-1)*math.sin(3.85522945675248*(2-2*p))*1.8752275007429 end end,OutIn=function(p) if p<0.5 then return outEl(p*2)/2 else return inEl(p*2-1)/2+0.5 end end}
+            t["Expo"]={In=inEx,Out=outEx,InOut=function(p) if p<0.5 then return 2*p*p*math.exp(4*(2*p-1)) else return 1-2*(p-1)*(p-1)*math.exp(4*(1-2*p)) end end,OutIn=function(p) if p<0.5 then return outEx(p*2)/2 else return inEx(p*2-1)/2+0.5 end end}
+            t["Circ"]={In=inCr,Out=outCr,InOut=function(p) local v=p*2;if v<1 then return-(math.sqrt(1-v*v)-1)/2 end local w=v-2;return(math.sqrt(1-w*w)-1)/2 end,OutIn=function(p) if p<0.5 then return math.sqrt(1-p*p)/2 else return-(math.sqrt(1-p*p)-1)/2+0.5 end end}
+            return t
+        end)()
+
+        -- ── Lerps (datatype interpolators) ────────────────────────────────────
+        local _Lerps=(function()
+            local vi=ipairs
+            local c0=Color3.new()
+            local function lerp3(a,b) return function(p) return a:Lerp(b,p) end end
+            local function sortKP(a,b) return a.Time<b.Time end
+            local function colorLerp(c1,c2)
+                local function lin(v) return v<0.0404482362771076 and v/12.92 or 0.87941546140213*(v+0.055)^2.4 end
+                local r1,g1,b1_=lin(c1.R),lin(c1.G),lin(c1.B)
+                local r2,g2,b2_=lin(c2.R),lin(c2.G),lin(c2.B)
+                local L1=0.2125862307855956*r1+0.7151703037034108*g1+0.0722004986433362*b1_
+                local L2=0.2125862307855956*r2+0.7151703037034108*g2+0.0722004986433362*b2_
+                local U1=3.6590806972265884*r1+11.442689580057424*g1+4.114991502426484*b1_
+                local U2=3.6590806972265884*r2+11.442689580057424*g2+4.114991502426484*b2_
+                local Ls1=L1>0.008856451679035631 and 116*L1^0.3333333333333333-16 or 903.296296296296*L1
+                local Ls2=L2>0.008856451679035631 and 116*L2^0.3333333333333333-16 or 903.296296296296*L2
+                local u1,v1,u2,v2
+                if U1>1e-15 then u1=Ls1*(0.9257063972951867*r1-0.8333736323779866*g1-0.09209820666085898*b1_)/U1;v1=Ls1*(9*L1/U1-0.46832) else u1=-0.19783*Ls1;v1=-0.46832*Ls1 end
+                if U2>1e-15 then u2=Ls2*(0.9257063972951867*r2-0.8333736323779866*g2-0.09209820666085898*b2_)/U2;v2=Ls2*(9*L2/U2-0.46832) else u2=-0.19783*Ls2;v2=-0.46832*Ls2 end
+                return function(p)
+                    local L=(1-p)*Ls1+p*Ls2; if L<0.0197955 then return c0 end
+                    local u=((1-p)*u1+p*u2)/L+0.19783; local v_=((1-p)*v1+p*v2)/L+0.46832
+                    local w=(L+16)/116; local Y=w>0.20689655172413793 and w*w*w or 0.12841854934601665*w-0.01771290335807126
+                    local X=Y*u/v_; local Z=Y*((3-0.75*u)/v_-5)
+                    local rr=7.2914074*X-1.537208*Y-0.4986286*Z
+                    local gg=-2.180094*X+1.8757561*Y+0.0415175*Z
+                    local bb_=0.1253477*X-0.2040211*Y+1.0569959*Z
+                    if rr<0 and rr<gg and rr<bb_ then gg=gg-rr;bb_=bb_-rr;rr=0
+                    elseif gg<0 and gg<bb_ then rr=rr-gg;bb_=bb_-gg;gg=0
+                    elseif bb_<0 then rr=rr-bb_;gg=gg-bb_;bb_=0 end
+                    local function tl(v_) return v_<0.0031306684425 and 12.92*v_ or 1.055*v_^0.4166666666666667-0.055 end
+                    local function cl(v_) return v_>1 and 1 or(v_<0 and 0 or v_) end
+                    return Color3.new(cl(tl(rr)),cl(tl(gg)),cl(tl(bb_)))
+                end
+            end
+            local t={
+                boolean=function(a,b) return function(p) return p<0.5 and a or b end end,
+                number=function(a,b) local d=b-a; return function(p) return a+d*p end end,
+                string=function(a,b) local n=#b; return function(p) return string.sub(b,1,math.max(1,math.floor(1+n*p))) end end,
+                CFrame=lerp3, Color3=colorLerp,
+                NumberRange=function(a,b) local mn,mx=b.Min-a.Min,b.Max-a.Max; return function(p) return NumberRange.new(a.Min+p*mn,a.Max+p*mx) end end,
+                UDim=function(a,b) local ds,do_=b.Scale-a.Scale,b.Offset-a.Offset; return function(p) return UDim.new(a.Scale+p*ds,a.Offset+p*do_) end end,
+                UDim2=lerp3, Vector2=lerp3, Vector3=lerp3,
+                NumberSequenceKeypoint=function(a,b) local dt,dv,de=b.Time-a.Time,b.Value-a.Value,b.Envelope-a.Envelope; return function(p) return NumberSequenceKeypoint.new(a.Time+p*dt,a.Value+p*dv,a.Envelope+p*de) end end,
+                PhysicalProperties=function(a,b) local dd,de,dew,df,dfw=b.Density-a.Density,b.Elasticity-a.Elasticity,b.ElasticityWeight-a.ElasticityWeight,b.Friction-a.Friction,b.FrictionWeight-a.FrictionWeight; return function(p) return PhysicalProperties.new(a.Density+p*dd,a.Elasticity+p*de,a.ElasticityWeight+p*dew,a.Friction+p*df,a.FrictionWeight+p*dfw) end end,
+                NumberSequence=function(a,b)
+                    return function(p)
+                        local out,used={},{}
+                        for _,kp in vi(a.Keypoints) do
+                            local lo,hi
+                            for _,kp2 in vi(b.Keypoints) do
+                                if kp2.Time==kp.Time then lo=kp2;hi=kp2;break
+                                elseif kp2.Time<kp.Time and(not lo or kp2.Time>lo.Time) then lo=kp2
+                                elseif kp2.Time>kp.Time and(not hi or kp2.Time<hi.Time) then hi=kp2 end
+                            end
+                            local tv,te
+                            if hi==lo then tv=hi.Value;te=hi.Envelope
+                            else local f=(kp.Time-lo.Time)/(hi.Time-lo.Time);tv=(hi.Value-lo.Value)*f+lo.Value;te=(hi.Envelope-lo.Envelope)*f+lo.Envelope end
+                            table.insert(out,NumberSequenceKeypoint.new(kp.Time,(tv-kp.Value)*p+kp.Value,(te-kp.Envelope)*p+kp.Envelope))
+                            used[kp.Time]=true
+                        end
+                        for _,kp in vi(b.Keypoints) do
+                            if not used[kp.Time] then
+                                local lo,hi
+                                for _,kp2 in vi(a.Keypoints) do
+                                    if kp2.Time==kp.Time then lo=kp2;hi=kp2;break
+                                    elseif kp2.Time<kp.Time and(not lo or kp2.Time>lo.Time) then lo=kp2
+                                    elseif kp2.Time>kp.Time and(not hi or kp2.Time<hi.Time) then hi=kp2 end
+                                end
+                                local tv,te
+                                if hi==lo then tv=hi.Value;te=hi.Envelope
+                                else local f=(kp.Time-lo.Time)/(hi.Time-lo.Time);tv=(hi.Value-lo.Value)*f+lo.Value;te=(hi.Envelope-lo.Envelope)*f+lo.Envelope end
+                                table.insert(out,NumberSequenceKeypoint.new(kp.Time,(kp.Value-tv)*p+tv,(kp.Envelope-te)*p+te))
+                            end
+                        end
+                        table.sort(out,sortKP); return NumberSequence.new(out)
+                    end
+                end,
+                ColorSequence=function(a,b)
+                    return function(p)
+                        local out,used={},{}
+                        for _,kp in vi(a.Keypoints) do
+                            local lo,hi
+                            for _,kp2 in vi(b.Keypoints) do
+                                if kp2.Time==kp.Time then lo=kp2;hi=kp2;break
+                                elseif kp2.Time<kp.Time and(not lo or kp2.Time>lo.Time) then lo=kp2
+                                elseif kp2.Time>kp.Time and(not hi or kp2.Time<hi.Time) then hi=kp2 end
+                            end
+                            local cv
+                            if hi==lo then cv=hi.Value
+                            else cv=colorLerp(lo.Value,hi.Value)((kp.Time-lo.Time)/(hi.Time-lo.Time)) end
+                            table.insert(out,ColorSequenceKeypoint.new(kp.Time,colorLerp(kp.Value,cv)(p)))
+                            used[kp.Time]=true
+                        end
+                        for _,kp in vi(b.Keypoints) do
+                            if not used[kp.Time] then
+                                local lo,hi
+                                for _,kp2 in vi(a.Keypoints) do
+                                    if kp2.Time==kp.Time then lo=kp2;hi=kp2;break
+                                    elseif kp2.Time<kp.Time and(not lo or kp2.Time>lo.Time) then lo=kp2
+                                    elseif kp2.Time>kp.Time and(not hi or kp2.Time<hi.Time) then hi=kp2 end
+                                end
+                                local cv
+                                if hi==lo then cv=hi.Value
+                                else cv=colorLerp(lo.Value,hi.Value)((kp.Time-lo.Time)/(hi.Time-lo.Time)) end
+                                table.insert(out,ColorSequenceKeypoint.new(kp.Time,colorLerp(kp.Value,cv)(p)))
+                            end
+                        end
+                        table.sort(out,sortKP); return ColorSequence.new(out)
+                    end
+                end,
+            }
+            return setmetatable(t,{__index=function(_,k) error("No lerp for type "..tostring(k),4) end})
+        end)()
+
+        -- ── BoatTween (custom tween engine) ───────────────────────────────────
+        local _BoatTween=(function()
+            local RS_=game:GetService("RunService")
+            local validSteps={Heartbeat=true,Stepped=true,RenderStepped=true}
+            if not RS_:IsClient() then validSteps.RenderStepped=nil end
+            local function btwait(t_)
+                local e=0; while e<(t_ or 0) do e=e+RS_.Heartbeat:Wait() end; return e
+            end
+            local BT={}
+            function BT.Create(_,inst,opts)
+                if not inst or typeof(inst)~="Instance" then return warn("BT: invalid instance",inst) end
+                local cfg=type(opts)=="table" and opts or {}
+                local step=(validSteps[cfg.StepType] and RS_[cfg.StepType]) or RS_.Heartbeat
+                local esN=cfg.EasingStyle or "Quad"; local esD=cfg.EasingDirection or "In"
+                local esFn=(_TF[esN] and _TF[esN][esD]) or _TF["Quad"]["In"]
+                local dur=math.max(type(cfg.Time)=="number" and cfg.Time or 1, 0.001)
+                local goal=type(cfg.Goal)=="table" and cfg.Goal or {}
+                local delay_=type(cfg.DelayTime)=="number" and cfg.DelayTime>0.027 and cfg.DelayTime or false
+                local repCnt=type(cfg.RepeatCount)=="number" and math.max(cfg.RepeatCount,-1) or 0
+                local totalReps=repCnt+1
+                local lerps={}
+                for k,v in pairs(goal) do lerps[k]=_Lerps[typeof(v)](inst[k],v) end
+                local cE=Instance.new("BindableEvent")
+                local sE=Instance.new("BindableEvent")
+                local rE=Instance.new("BindableEvent")
+                local conn=nil; local elapsed=0; local repN=0; local reversing=false
+                local tw={
+                    Instance=inst, PlaybackState=Enum.PlaybackState.Begin,
+                    Completed=cE.Event, Stopped=sE.Event, Resumed=rE.Event,
+                }
+                function tw.Destroy()
+                    if conn then conn:Disconnect();conn=nil end
+                    cE:Destroy(); sE:Destroy(); rE:Destroy()
+                end
+                function tw.Play()
+                    elapsed=0; repN=0; reversing=false
+                    tw.PlaybackState=Enum.PlaybackState.Playing
+                    if conn then conn:Disconnect();conn=nil end
+                    if delay_ then tw.PlaybackState=Enum.PlaybackState.Delayed; btwait(delay_) end
+                    local st=os.clock()-elapsed
+                    conn=step:Connect(function()
+                        elapsed=os.clock()-st
+                        if dur<=elapsed then
+                            for k,fn in pairs(lerps) do inst[k]=fn(reversing and 0 or 1) end
+                            conn:Disconnect();conn=nil
+                            if cfg.Reverses and not reversing then
+                                reversing=true; elapsed=0; st=os.clock()
+                                conn=step:Connect(function()
+                                    elapsed=os.clock()-st
+                                    if dur<=elapsed then
+                                        for k,fn in pairs(lerps) do inst[k]=fn(0) end
+                                        conn:Disconnect();conn=nil
+                                        repN=repN+1
+                                        if totalReps~=0 and repN>=totalReps then tw.PlaybackState=Enum.PlaybackState.Completed;cE:Fire() else tw.Play() end
+                                    else local a=esFn(1-elapsed/dur); for k,fn in pairs(lerps) do inst[k]=fn(a) end end
+                                end)
+                            else
+                                repN=repN+1
+                                if totalReps~=0 and repN>=totalReps then tw.PlaybackState=Enum.PlaybackState.Completed;cE:Fire() else tw.Play() end
+                            end
+                        else local a=esFn(elapsed/dur); for k,fn in pairs(lerps) do inst[k]=fn(reversing and 1-a or a) end end
+                    end)
+                end
+                function tw.Stop()
+                    if conn then conn:Disconnect();conn=nil; tw.PlaybackState=Enum.PlaybackState.Cancelled;sE:Fire() end
+                end
+                function tw.Resume() tw.Play(); rE:Fire() end
+                function tw.Once(_, ev_, fn_) return ev_:Connect(fn_) end
+                return tw
+            end
+            return BT
+        end)()
+
+        -- ── Library (inline of game.ReplicatedStorage.library) ────────────────
+        local v29202=(function()
+            local lib={EFP=game.Workspace.Thrown}
+            local _TS_=game:GetService("TweenService")
+            local _rcp_=RaycastParams.new()
+            _rcp_.FilterType=Enum.RaycastFilterType.Include
+            pcall(function() _rcp_.FilterDescendantsInstances={workspace.Built,workspace.Map} end)
+
+            function lib.PlayTween(inst,cfg,cb)
+                local tw=_BoatTween:Create(inst,cfg)
+                tw.Play()
+                local c=tw.Completed:Connect(function() if cb then cb() end; pcall(tw.Destroy) end)
+                task.delay(cfg.Time,function() pcall(function() c:Disconnect() end); pcall(tw.Destroy) end)
+                return tw
+            end
+            lib.Maid=_Maid; lib.Bezier=_Bezier; lib.FastSpawn=_FastSpawn
+
+            function lib.Able(p)
+                local fx=p.FX; local on=p.On; local nm=p.name
+                for _,v in pairs(fx:GetDescendants()) do
+                    if v:IsA("ParticleEmitter") then
+                        if nm then if v:GetAttribute(nm) then v.Enabled=on end
+                        else v.Enabled=on end
+                    end
+                end
+            end
+            function lib.QuickFX(p)
+                local fx=p.FX; local anchor=p.Anchor; local maid=p.Maid
+                if p.Ray then
+                    local r=game.Workspace:Raycast(anchor.Position,Vector3.new(0,-10,0),_rcp_)
+                    if not r then return end
+                    local a,b,c=anchor:ToOrientation()
+                    anchor=CFrame.new(r.Position)*CFrame.Angles(a,b,c)
+                end
+                local clone=fx:Clone()
+                if clone:IsA("Model") then clone:PivotTo(anchor)
+                elseif clone:IsA("BasePart") then clone.CFrame=anchor end
+                if clone:IsA("Attachment") then clone.Parent=anchor
+                else clone.Parent=lib.EFP end
+                maid:give(clone)
+                return clone
+            end
+            function lib.LifeScale(p)
+                for _,v in pairs(p.FX:GetDescendants()) do
+                    if v:IsA("ParticleEmitter") then
+                        v.Lifetime=NumberRange.new(v.Lifetime.Min*p.Scale,v.Lifetime.Max*p.Scale)
+                    end
+                end
+            end
+            function lib.dtwait(t_)
+                local e=0
+                while e<t_ do e=e+game:GetService("RunService").Heartbeat:Wait() end
+                return e
+            end
+            function lib.RaiseZIndex(p)
+                for _,v in pairs(p.FX:GetDescendants()) do
+                    if v:IsA("ParticleEmitter") then v.ZOffset=v.ZOffset+p.Count end
+                end
+            end
+            function lib.QuickWeld(p)
+                local clone=p.FX:Clone()
+                task.delay(35,function() if clone and clone.Parent then clone:Destroy() end end)
+                local w=Instance.new("Weld")
+                if clone:IsA("Model") then w.Part0=clone.PrimaryPart
+                else w.Part0=clone; clone.CanCollide=false; clone.Massless=true; clone.Anchored=false end
+                w.Part1=p.P; w.C0=p.C0 or CFrame.new(); w.Parent=clone
+                clone.Parent=lib.EFP; p.Maid:give(clone); w.Name="FXWELD"
+                return clone,w
+            end
+            function lib.PlayAttachment(mdl,lifetime,opts)
+                for _,v in pairs(mdl:GetDescendants()) do
+                    if v:IsA("ParticleEmitter") then
+                        local a=v:GetAttributes()
+                        local ed=a.EmitDelay; local rc=a.RepeatCount or 1; local rd=a.RepeatDelay
+                        task.spawn(function()
+                            for _=1,rc do
+                                if ed then
+                                    task.delay(ed,function()
+                                        v:Emit(a.EmitCount)
+                                        if a.EmitDuration then v.Enabled=true; task.delay(a.EmitDuration,function() v.Enabled=false end) end
+                                    end)
+                                else
+                                    v:Emit(a.EmitCount)
+                                    if a.EmitDuration then v.Enabled=true; task.delay(a.EmitDuration,function() v.Enabled=false end) end
+                                end
+                                if rd then task.wait(rd) end
+                            end
+                        end)
+                    end
+                    if v:IsA("PointLight") and lifetime then
+                        lib.PlayTween(v,{EasingStyle="Sine",Time=lifetime,Goal={Brightness=0}})
+                    end
+                    if v:IsA("Beam") then
+                        local a=v:GetAttributes()
+                        local dur=a.Duration
+                        local tt=opts and opts.TweenTime or 0.5
+                        _TS_:Create(v,TweenInfo.new(tt,Enum.EasingStyle.Sine,Enum.EasingDirection.Out),{Width1=a.Width1,Width0=a.Width0}):Play()
+                        if dur then
+                            task.delay(dur,function()
+                                _TS_:Create(v,TweenInfo.new(tt,Enum.EasingStyle.Sine,Enum.EasingDirection.Out),{Width1=0,Width0=0}):Play()
+                            end)
+                        end
+                    end
+                end
+                if lifetime then game.Debris:AddItem(mdl,lifetime) end
+            end
+            function lib.PlayMesh(cfg_)
+                task.spawn(function()
+                    local m=cfg_.Model; local info=cfg_.Info or TweenInfo.new(1,Enum.EasingStyle.Sine)
+                    local s=m:FindFirstChild("Start"); local e=m:FindFirstChild("End")
+                    if not(s and e) then warn("NO START OR END"); return end
+                    m.PrimaryPart=s
+                    if not cfg_.Skip then
+                        for _,v in pairs(m:GetChildren()) do
+                            if v:IsA("BasePart") then v.CanCollide=false; v.Anchored=true end
+                        end
+                    end
+                    if cfg_.Anchor then m:SetPrimaryPartCFrame(cfg_.Anchor) end
+                    if cfg_.T then s.Transparency=cfg_.T end
+                    local endT=cfg_.EndT or 1; e.Transparency=1; m.Parent=lib.EFP
+                    local decal=s:FindFirstChildOfClass("Decal")
+                    local mesh=s:FindFirstChildOfClass("SpecialMesh")
+                    local emesh=e:FindFirstChildOfClass("SpecialMesh")
+                    local edecal=e:FindFirstChildOfClass("Decal")
+                    if edecal and not cfg_.Skip then edecal.Transparency=1 end
+                    local tw_
+                    if cfg_.Del then
+                        _TS_:Create(s,info,{Size=e.Size,CFrame=e.CFrame}):Play()
+                        task.delay(cfg_.Del,function()
+                            tw_=_TS_:Create(s,info,{Transparency=endT}); tw_:Play()
+                            if decal then for _,d in pairs(s:GetChildren()) do if d:IsA("Decal") then _TS_:Create(d,info,{Transparency=endT}):Play() end end end
+                            if mesh then _TS_:Create(mesh,info,{Scale=emesh.Scale}):Play() end
+                        end)
+                    else
+                        if mesh then _TS_:Create(mesh,info,{Scale=emesh.Scale}):Play() end
+                        if decal then
+                            for _,d in pairs(s:GetChildren()) do if d:IsA("Decal") then _TS_:Create(d,info,{Transparency=endT}):Play() end end
+                            tw_=_TS_:Create(s,info,{Size=e.Size,CFrame=e.CFrame}); tw_:Play()
+                        else
+                            tw_=_TS_:Create(s,info,{Size=e.Size,Transparency=endT,CFrame=e.CFrame}); tw_:Play()
+                        end
+                    end
+                    if not cfg_.Stay then
+                        if cfg_.Del then task.wait(cfg_.Del+0.1) end
+                        if tw_ then tw_.Completed:Connect(function() m:Destroy() end) end
+                    end
+                end)
+            end
+            function lib.BindScale(p)
+                local nv=p.Maid:give(Instance.new("NumberValue")); nv.Value=p.Init or 1
+                p.Maid:give(nv.Changed:Connect(function() p.FX:ScaleTo(nv.Value) end))
+                return nv
+            end
+            function lib.RandomRot()
+                return CFrame.Angles(0,math.rad(math.random(-360,360)),0)
+            end
+            function lib.GlassLight(p)
+                local h=Instance.new("Highlight")
+                h.FillTransparency=1; h.OutlineTransparency=1; h.Parent=p
+            end
+            function lib.Yield(p)
+                local t_=p.Time or 5; local s=tick()
+                while tick()-s<t_ do
+                    local f=p.Char:FindFirstChild(p.Event)
+                    if f then return f end
+                    lib.dtwait(0.01)
+                end
+            end
+            function lib.SetSmoke(p)
+                local r=game.Workspace:Raycast(p.Anchor.Position,Vector3.new(0,-(p.Dist or 20),0),_rcp_)
+                if r then
+                    local cs={ColorSequenceKeypoint.new(0,r.Instance.Color),ColorSequenceKeypoint.new(1,r.Instance.Color)}
+                    for _,v in pairs(p.FX:GetDescendants()) do
+                        if v:IsA("ParticleEmitter") then v.Color=ColorSequence.new(cs) end
+                    end
+                    return r
+                end
+            end
+            function lib.PlayFlipBook(p)
+                local mesh=p.Mesh; local delta=p.Delta or 0.02; local cleanup=p.DWC==nil and true or p.DWC
+                local rep=p.Repeat or 1; local fps=p.FPS or 1
+                local folder=mesh:FindFirstChild("Folder"); local decal=mesh:FindFirstChild("Decal")
+                if folder and decal then
+                    lib.FastSpawn(function()
+                        for _=1,rep do
+                            if not mesh:IsDescendantOf(game.Workspace) then break end
+                            for i=1,#folder:GetChildren(),fps do
+                                local img=folder:FindFirstChild(tostring(i)) or folder:GetChildren()[#folder:GetChildren()]
+                                if img then decal.Texture=img.Texture end
+                                if delta=="Step" then game:GetService("RunService").RenderStepped:Wait()
+                                else lib.dtwait(delta) end
+                            end
+                        end
+                        if cleanup and cleanup~=false then mesh:Destroy() end
+                    end)
+                end
+            end
+            function lib.Impact(p) local c=p:Clone(); c.Parent=game.Lighting; delay(0.1,function() c:Destroy() end) end
+            function lib.ChangeParticleColor(p)
+                local parts={}
+                if p.Particle:IsA("ParticleEmitter") then table.insert(parts,p.Particle)
+                else for _,v in pairs(p.Particle:GetDescendants()) do if v:IsA("ParticleEmitter") then table.insert(parts,v) end end end
+                for _,v in pairs(parts) do
+                    if p.Color then
+                        v.Color=ColorSequence.new({ColorSequenceKeypoint.new(0,p.Color),ColorSequenceKeypoint.new(1,p.Color)})
+                    end
+                end
+            end
+            -- CameraShaker removed (not needed in standalone)
+            function lib.CamShake() end
+            return lib
+        end)()
+        local l_PlayAttachment_17 = v29202.PlayAttachment
+        local l_Maid_31           = v29202.Maid
+        local l_PlayTween_15      = v29202.PlayTween
+        local l_dtwait_17         = v29202.dtwait
+        local l_EFP_17            = v29202.EFP
+        local l_PlayMesh_17       = v29202.PlayMesh
+        local l_RaiseZIndex_15    = v29202.RaiseZIndex
+        local l_Able_17           = v29202.Able
+        local l_LifeScale_15      = v29202.LifeScale
+        local l_QuickFX_17        = v29202.QuickFX
+
+        local v29222 = Random.new()
+        local l_vfx_4 = game.ReplicatedStorage.Resources.UFW.vfx
+        local v29224  = setmetatable({}, v29201)
+        v29224._maid  = l_Maid_31.new()
+        local v29226  = false
+        local function cleanUp()
+            if not v29226 then
+                v29226 = true
+                v29224._maid:doCleaning()
+            end
+        end
+        task.delay(10, cleanUp)
+
+        local l_BG_0           = v29199.BG
+        local l_l_v29157_0_0   = l_v29157_0
+        local l_CurrentCamera_37 = game.Workspace.CurrentCamera
+        local l_l_TweenService_66_1 = l_TweenService_66
+
+        -- ── PunchEvent ───────────────────────────────────────────────────────
+        local function v29247()
+            warn("theyung")
+            local v29236 = v29224._maid:give(l_vfx_4["Right Arm"]:Clone())
+            for _, v29238 in pairs(v29236:GetChildren()) do
+                v29224._maid:give(v29238)
+                v29238.Parent = l_l_v29157_0_0["Right Arm"]
+                Debris:AddItem(v29238, 0.6)
+            end
+            local l_Highlight_22 = Instance.new("Highlight")
+            l_Highlight_22.FillTransparency    = 1
+            l_Highlight_22.FillColor           = Color3.new(1, 1, 1)
+            l_Highlight_22.OutlineTransparency = 0.5
+            l_Highlight_22.OutlineColor        = Color3.fromRGB(0, 0, 0)
+            l_Highlight_22.Parent              = l_l_v29157_0_0["Right Arm"]
+            Debris:AddItem(l_Highlight_22, 0.6)
+            local v29240    = v29224._maid:give(l_vfx_4.ArmThing:Clone())
+            local l_Weld_74 = Instance.new("Weld")
+            l_Weld_74.Part0  = v29240.PrimaryPart
+            l_Weld_74.Part1  = l_l_v29157_0_0["Right Arm"]
+            l_Weld_74.Parent = v29240
+            l_Weld_74.C0     = CFrame.new(0.8, 0, 0) * CFrame.Angles(0, 0, -math.pi / 2)
+            v29240.Parent    = l_EFP_17
+            l_l_TweenService_66_1:Create(v29240.PrimaryPart.Mesh, TweenInfo.new(0.5, Enum.EasingStyle.Sine), {Scale = v29240.End.Mesh.Scale}):Play()
+            l_l_TweenService_66_1:Create(l_Weld_74, TweenInfo.new(0.5, Enum.EasingStyle.Sine), {C0 = l_Weld_74.C0 * CFrame.new(0, -0.4, 0) * CFrame.Angles(0, math.pi, 0)}):Play()
+            for _, v29243 in pairs(v29240.PrimaryPart:GetChildren()) do
+                if v29243:IsA("Decal") then
+                    v29243.Transparency = 0
+                    l_l_TweenService_66_1:Create(v29243, TweenInfo.new(1, Enum.EasingStyle.Sine), {Transparency = 1}):Play()
+                end
+            end
+            task.delay(0.3, function()
+                local v29246 = l_vfx_4.Upwave:Clone()
+                v29246:ScaleTo(0.1)
+                l_PlayMesh_17({Model = v29246, Anchor = l_l_v29157_0_0["Right Arm"].CFrame * CFrame.Angles(0, 0, math.pi / 2), Info = TweenInfo.new(0.3, Enum.EasingStyle.Quad)})
+            end)
+            l_dtwait_17(0.5)
+            v29240:Destroy()
+        end
+
+        -- ── PunchCloseEvent ──────────────────────────────────────────────────
+        local function v29263()
+            local function ImpactFramesClose()
+                local v29251, v29252 = nil, 1
+                v29224.Impact = v29224._maid:give(l_l_UFW_2_0.Impact:Clone())
+                v29224.Impact.Enabled = false
+                v29224.Impact.Parent  = Players.LocalPlayer.PlayerGui
+                local l_Impact_17 = v29224.Impact
+                local v29254
+                v29254 = shared.loop(function()
+                    local l_l_Impact_17_FirstChild_0 = l_Impact_17:FindFirstChild((tostring(v29252)))
+                    if not l_l_Impact_17_FirstChild_0 then
+                        if l_Impact_17 and l_Impact_17.Parent then l_Impact_17:Destroy() end
+                        if v29251 and v29251.Parent then v29251:Destroy() end
+                        return v29254()
+                    else
+                        v29252 = v29252 + 1
+                        l_l_Impact_17_FirstChild_0.Size = UDim2.new(1, 0, 1, 0)
+                        if v29251 then v29251:Destroy() end
+                        v29251 = l_l_Impact_17_FirstChild_0
+                        return
+                    end
+                end, 34)
+                task.delay(5, function() if v29254 then v29254() end end)
+            end
+            local v29257 = v29224._maid:give(l_vfx_4.NextArm:Clone())
+            for _, v29259 in pairs(v29257:GetChildren()) do
+                v29224._maid:give(v29259)
+                v29259.Parent = l_l_v29157_0_0["Right Arm"]
+                Debris:AddItem(v29259, 0.6)
+            end
+            for _, v29261 in pairs(l_l_v29157_0_0["Right Arm"]:GetDescendants()) do
+                if v29261:IsA("Beam") then
+                    l_l_TweenService_66_1:Create(v29261, TweenInfo.new(0.3, Enum.EasingStyle.Sine), {TextureSpeed = 0}):Play()
+                end
+            end
+            ImpactFramesClose()
+            local v29262 = l_QuickFX_17({FX = l_vfx_4.Break, Anchor = l_l_v29157_0_0["Right Arm"].CFrame * CFrame.new(0, -2, 0), Maid = v29224._maid})
+            l_LifeScale_15({FX = v29262, Scale = 0.5})
+            l_PlayAttachment_17(v29262)
+        end
+
+        -- ── WallEvent ────────────────────────────────────────────────────────
+        local function v29274()
+            local v29264 = l_QuickFX_17({FX = l_vfx_4.FinalCrack, Anchor = v29199.KJWallBreak.PrimaryPart.CFrame * CFrame.Angles(math.pi / 2, 0, 0), Maid = v29224._maid})
+            for _, v29266 in pairs(v29264:GetDescendants()) do
+                if v29266:IsA("Beam") then
+                    l_l_TweenService_66_1:Create(v29266, TweenInfo.new(0.4, Enum.EasingStyle.Sine), {TextureSpeed = 0}):Play()
+                end
+            end
+            l_dtwait_17(0.1);
+            (function()
+                local v29267, v29268 = nil, 1
+                v29224.Impact = v29224._maid:give(l_l_UFW_2_0.Impact3:Clone())
+                v29224.Impact.Enabled = false
+                v29224.Impact.Parent  = Players.LocalPlayer.PlayerGui
+                local l_Impact_18 = v29224.Impact
+                local v29270
+                v29270 = shared.loop(function()
+                    local l_l_Impact_18_FirstChild_0 = l_Impact_18:FindFirstChild((tostring(v29268)))
+                    if not l_l_Impact_18_FirstChild_0 then
+                        if l_Impact_18 and l_Impact_18.Parent then l_Impact_18:Destroy() end
+                        if v29267 and v29267.Parent then v29267:Destroy() end
+                        return v29270()
+                    else
+                        v29268 = v29268 + 1
+                        l_l_Impact_18_FirstChild_0.Size = UDim2.new(1, 0, 1, 0)
+                        if v29267 then v29267:Destroy() end
+                        v29267 = l_l_Impact_18_FirstChild_0
+                        return
+                    end
+                end, 34)
+                task.delay(5, function() if v29270 then v29270() end end)
+            end)()
+            v29224.Impact1 = v29224._maid:give(l_l_UFW_2_0:FindFirstChild("1"):Clone())
+            v29224.Impact1.Parent = game.Lighting; l_dtwait_17(0.05); v29224.Impact1:Destroy()
+            v29224.Impact2 = v29224._maid:give(l_l_UFW_2_0:FindFirstChild("2"):Clone())
+            v29224.Impact2.Parent = game.Lighting; l_dtwait_17(0.05); v29224.Impact2:Destroy()
+            l_dtwait_17(0.1)
+            for _, v29273 in pairs(v29264:GetDescendants()) do
+                if v29273:IsA("Beam") then
+                    l_PlayTween_15(v29273, {Time = 0.1, EasingStyle = "Sine", Goal = {Transparency = NumberSequence.new({NumberSequenceKeypoint.new(0, 1), NumberSequenceKeypoint.new(1, 1)})}})
+                    Debris:AddItem(v29273, 0.1)
+                end
+            end
+        end
+
+        -- ── SwapEvent ────────────────────────────────────────────────────────
+        local function v29290()
+            v29194.Flexworks.Visible = false
+            task.spawn(function()
+                local v29275 = CFrame.new(0, 0, -20) * CFrame.Angles(0, math.pi, 0)
+                local v29276 = l_QuickFX_17({FX = l_vfx_4.BeamCam, Anchor = l_CurrentCamera_37.CFrame * v29275, Maid = v29224._maid})
+                for _, v29278 in pairs(v29276:GetDescendants()) do
+                    if v29278:IsA("Beam") then
+                        local l_Transparency_11 = v29278.Transparency
+                        v29278.Transparency = NumberSequence.new({NumberSequenceKeypoint.new(0, 1), NumberSequenceKeypoint.new(1, 1)})
+                        l_PlayTween_15(v29278, {Time = 2, EasingStyle = "Sine", Goal = {Transparency = l_Transparency_11}})
+                        v29278.TextureSpeed = 0
+                        l_l_TweenService_66_1:Create(v29278, TweenInfo.new(3, Enum.EasingStyle.Exponential), {TextureSpeed = 8}):Play()
+                    end
+                end
+                local v29280 = tick()
+                while tick() - v29280 < 1 do
+                    warn("le bossuuuu")
+                    v29276:setPrimaryPartCFrame(l_CurrentCamera_37.CFrame * v29275)
+                    l_dtwait_17(0.02)
+                end
+                for _, v29282 in pairs(v29276:GetDescendants()) do
+                    if v29282:IsA("Beam") then
+                        l_PlayTween_15(v29282, {Time = 0.15, EasingStyle = "Sine", Goal = {Transparency = NumberSequence.new({NumberSequenceKeypoint.new(0, 1), NumberSequenceKeypoint.new(1, 1)})}})
+                        Debris:AddItem(v29282, 0.15)
+                    end
+                end
+            end)
+            task.spawn(function()
+                for _ = 1, 8 do
+                    local v29285     = {FX = l_vfx_4.TP, Maid = v29224._maid}
+                    local _, v29287, _ = l_l_v29157_0_0.HumanoidRootPart.CFrame:ToOrientation()
+                    v29285.Anchor    = CFrame.new(l_l_v29157_0_0.Torso.Position) * CFrame.Angles(0, v29287, 0) * CFrame.Angles(0, 0, math.pi / 2)
+                    local v29286     = l_QuickFX_17(v29285)
+                    l_LifeScale_15({FX = v29286, Scale = 0.4})
+                    l_RaiseZIndex_15({FX = v29286, Count = 1})
+                    l_PlayAttachment_17(v29286)
+                    l_dtwait_17(0.04)
+                end
+            end)
+            l_l_TweenService_66_1:Create(v29194.Black, TweenInfo.new(2, Enum.EasingStyle.Quad), {Size = UDim2.new(1.35, 0, 1.35, 0)}):Play()
+            l_dtwait_17(0.4)
+            local v29289 = l_QuickFX_17({FX = l_vfx_4.Glint, Anchor = l_CurrentCamera_37.CFrame * CFrame.new(0, 0, -10), Maid = v29224._maid})
+            l_PlayAttachment_17(v29289)
+        end
+
+        -- ── ZoomEvent ────────────────────────────────────────────────────────
+        local function v29314()
+            local v29291 = l_vfx_4.UpTime:Clone()
+            v29291:ScaleTo(0.2)
+            l_PlayMesh_17({Model = v29291, T = 0, Anchor = l_CurrentCamera_37.CFrame * CFrame.new(0, 0, -10) * CFrame.Angles(0, math.pi / 2, 0), Info = TweenInfo.new(0.2, Enum.EasingStyle.Exponential)})
+            for v29292 = 1, 5 do
+                local v29293 = l_vfx_4.Upwave:Clone()
+                v29293:ScaleTo(0.2 * (v29292 * 0.4))
+                l_PlayMesh_17({Model = v29293, T = 0, Anchor = l_CurrentCamera_37.CFrame * CFrame.new(0, 0, -10) * CFrame.Angles(0, math.pi / 2, 0), Info = TweenInfo.new(0.3 + v29292 / 10, Enum.EasingStyle.Exponential)})
+                local v29294 = l_vfx_4.UpTimeReverse:Clone()
+                v29294:ScaleTo(0.2 * (v29292 * 0.4))
+                l_PlayMesh_17({Model = v29294, T = 0, EndT = 0, Anchor = l_CurrentCamera_37.CFrame * CFrame.new(0, 0, -10) * CFrame.Angles(0, math.pi / 2, 0), Info = TweenInfo.new(0.5 + v29292 / 10, Enum.EasingStyle.Exponential)})
+                l_dtwait_17(0.04)
+            end
+            local function RealStar()
+                local v29295 = CFrame.new(0, -7, -150) * CFrame.Angles(0, math.pi, 0)
+                local v29296 = l_CurrentCamera_37.CFrame * v29295
+                local v29297 = v29224._maid:give(l_vfx_4.ThingStart:Clone())
+                v29297:PivotTo(v29296); v29297.Parent = l_EFP_17
+                l_BG_0.Color = Color3.new(0.117647, 0.117647, 0.117647)
+                Debris:AddItem(v29297, 2)
+                local v29298 = v29224._maid:give(l_vfx_4.ThingMiddle:Clone())
+                v29298:PivotTo(v29296); v29298.Parent = l_EFP_17
+                for _, v29300 in pairs(v29297:GetChildren()) do
+                    local l_v29298_FirstChild_0 = v29298:FindFirstChild(v29300.Name)
+                    if l_v29298_FirstChild_0 then
+                        l_l_TweenService_66_1:Create(v29300, TweenInfo.new(0.7, Enum.EasingStyle.Sine), {Size = l_v29298_FirstChild_0.Size, CFrame = l_v29298_FirstChild_0.CFrame}):Play()
+                    end
+                end
+                l_dtwait_17(0.7)
+                local v29302 = v29224._maid:give(l_vfx_4.ThingEnd:Clone())
+                v29302:PivotTo(v29296); v29302.Parent = l_EFP_17
+                task.spawn(function()
+                    local v29303 = tick()
+                    while tick() - v29303 < 2 do
+                        if v29297:FindFirstChild("star") then
+                            v29297.star.CFrame = v29297.star.CFrame * CFrame.Angles(0, 0, 0.08726646259971647)
+                        end
+                        l_dtwait_17(0.01)
+                    end
+                end)
+                for _, v29305 in pairs(v29297:GetChildren()) do
+                    local l_v29302_FirstChild_0 = v29302:FindFirstChild(v29305.Name)
+                    if l_v29302_FirstChild_0 and not v29305.Name:find("SH") and not v29305.Name:find("sh") then
+                        if v29305.Name == "star" then
+                            l_l_TweenService_66_1:Create(v29305, TweenInfo.new(3, Enum.EasingStyle.Sine), {Size = l_v29302_FirstChild_0.Size}):Play()
+                        else
+                            l_l_TweenService_66_1:Create(v29305, TweenInfo.new(3, Enum.EasingStyle.Sine), {Size = l_v29302_FirstChild_0.Size, CFrame = l_v29302_FirstChild_0.CFrame}):Play()
+                        end
+                    end
+                end
+                l_dtwait_17(0.4)
+                local v29307 = l_QuickFX_17({FX = l_vfx_4.Particles, Maid = v29224._maid, Anchor = l_CurrentCamera_37.CFrame * CFrame.new(0, 0, -20)})
+                l_Able_17({FX = v29307, On = true})
+                local v29308 = tick()
+                task.spawn(function()
+                    while tick() - v29308 < 1.5 do
+                        v29307:PivotTo(l_CurrentCamera_37.CFrame * CFrame.new(0, 0, -20))
+                        l_dtwait_17(0.02)
+                    end
+                    v29307:Destroy()
+                end)
+                l_dtwait_17(0.3)
+                local v29309 = v29224._maid:give(Instance.new("ColorCorrectionEffect"))
+                v29309.Parent = game.Lighting
+                l_l_TweenService_66_1:Create(v29309, TweenInfo.new(0.3, Enum.EasingStyle.Sine), {Brightness = 1}):Play()
+                task.spawn(function()
+                    l_l_TweenService_66_1:Create(game.Lighting, TweenInfo.new(1.827, Enum.EasingStyle.Quad), {Brightness = 0, Ambient = Color3.fromRGB(0, 0, 0), OutdoorAmbient = Color3.fromRGB(25, 25, 25)}):Play()
+                    l_l_TweenService_66_1:Create(game.Lighting, TweenInfo.new(0.65, Enum.EasingStyle.Quad), {ClockTime = 0}):Play()
+                end)
+                l_dtwait_17(0.3)
+                v29297:Destroy(); v29298:Destroy(); v29302:Destroy()
+                l_Able_17({FX = v29307, On = false})
+                l_l_TweenService_66_1:Create(v29309, TweenInfo.new(0.1, Enum.EasingStyle.Sine), {Brightness = 0}):Play()
+            end
+            l_BG_0.Size = l_BG_0.Size * 6
+            l_dtwait_17(0.1)
+            RealStar()
+        end
+
+        -- ── SpaceThing ───────────────────────────────────────────────────────
+        local function v29325()
+            local v29315 = CFrame.new(0, -3.5, -80)
+            local v29316 = l_QuickFX_17({FX = l_vfx_4.Space, Maid = v29224._maid, Anchor = l_CurrentCamera_37.CFrame * v29315})
+            l_Able_17({FX = v29316, On = false})
+            for _, v29318 in pairs(v29316:GetDescendants()) do
+                if v29318.Name == "A1" then
+                    local l_CFrame_106 = v29318.CFrame
+                    v29318.CFrame = v29318.CFrame * CFrame.new(-v29318.CFrame.Position.Y * -50, 0, -v29318.CFrame.Position.Z)
+                    l_l_TweenService_66_1:Create(v29318, TweenInfo.new(1, Enum.EasingStyle.Sine), {CFrame = l_CFrame_106}):Play()
+                elseif v29318.Name == "Glint" then
+                    local l_CFrame_107 = v29318.CFrame
+                    v29318.CFrame = v29318.CFrame * CFrame.new(0, 0, -v29318.CFrame.Position.Z)
+                    l_l_TweenService_66_1:Create(v29318, TweenInfo.new(5, Enum.EasingStyle.Sine), {CFrame = l_CFrame_107}):Play()
+                elseif v29318:IsA("Beam") then
+                    local l_Width0_9 = v29318.Width0; local l_Width1_9 = v29318.Width1; local l_TextureSpeed_0 = v29318.TextureSpeed
+                    v29318.Width0 = v29318.Width0 * 0.001; v29318.Width1 = v29318.Width1 * 0.001; v29318.TextureSpeed = -l_TextureSpeed_0 * 0.5
+                    l_l_TweenService_66_1:Create(v29318, TweenInfo.new(3, Enum.EasingStyle.Sine), {Width0 = l_Width0_9, Width1 = l_Width1_9}):Play()
+                    task.delay(0.4, function()
+                        l_l_TweenService_66_1:Create(v29318, TweenInfo.new(4, Enum.EasingStyle.Sine), {TextureSpeed = l_TextureSpeed_0 * 2}):Play()
+                        l_Able_17({FX = v29316, On = true})
+                    end)
+                end
+            end
+            local v29324 = tick()
+            task.spawn(function()
+                while tick() - v29324 < 2.5 do
+                    v29316:PivotTo(l_CurrentCamera_37.CFrame * v29315)
+                    l_dtwait_17(0.02)
+                end
+                v29316:Destroy()
+            end)
+            return v29316
+        end
+
+        -- ── StarSpace ────────────────────────────────────────────────────────
+        local function v29338()
+            task.spawn(function()
+                l_l_TweenService_66_1:Create(game.Lighting, TweenInfo.new(1.827, Enum.EasingStyle.Quad), {Brightness = 0, Ambient = Color3.fromRGB(0, 0, 0), OutdoorAmbient = Color3.fromRGB(25, 25, 25)}):Play()
+                l_l_TweenService_66_1:Create(game.Lighting, TweenInfo.new(0.65, Enum.EasingStyle.Quad), {ClockTime = 0}):Play()
+            end)
+            v29199:Destroy()
+            local v29329time = tick()
+            local v29329 = l_QuickFX_17({FX = l_vfx_4.Space1, Anchor = l_CurrentCamera_37.CFrame * CFrame.new(0, 0, -100) * CFrame.Angles(0, math.pi / 2, 0), Maid = v29224._maid})
+            task.spawn(function()
+                for _, v29331 in pairs(v29329:GetDescendants()) do
+                    if v29331.Name:find("smoke") then
+                        l_l_TweenService_66_1:Create(v29331, TweenInfo.new(0.6, Enum.EasingStyle.Sine), {TimeScale = 0.05}):Play()
+                        v29331:Emit(10); print("did")
+                    elseif v29331:IsA("ParticleEmitter") then
+                        v29331:Emit(5)
+                    end
+                end
+                task.spawn(function()
+                    for _ = 1, 10 do
+                        for _, v29334 in pairs(v29329.Attachment:GetChildren()) do
+                            if v29334.Name == "star" then v29334:Emit(1) end
+                        end
+                        l_dtwait_17(0.2)
+                    end
+                end)
+            end)
+            l_LifeScale_15({FX = v29329, Scale = 0.5})
+            l_LifeScale_15({FX = v29329.Attachment, Scale = 2})
+            l_RaiseZIndex_15({FX = v29329.Attachment, Count = 5})
+            task.spawn(function()
+                while tick() - v29329time < 1.5 do
+                    if tick() - v29329time < 1 then
+                        v29329.CFrame = l_CurrentCamera_37.CFrame * CFrame.new(0, 0, -222500)
+                    else
+                        v29329.CFrame = l_CurrentCamera_37.CFrame * CFrame.new(0, 0, -100)
+                    end
+                    l_dtwait_17(0.01)
+                end
+            end)
+            l_dtwait_17(2.5)
+            v29329:Destroy()
+            v29325()
+            local v29335 = l_QuickFX_17({FX = l_vfx_4.Scene, Anchor = l_CurrentCamera_37.CFrame * CFrame.new(0, 0, -10000) * CFrame.Angles(0, math.pi / 2, 0), Maid = v29224._maid})
+            l_dtwait_17(2.15)
+            local v29336 = tick()
+            task.spawn(function()
+                while tick() - v29336 < 1.5 do
+                    v29335:PivotTo(l_CurrentCamera_37.CFrame * CFrame.new(0, -10, -450) * CFrame.Angles(0.6108652381980153, math.pi / 2, 0))
+                    l_dtwait_17(0.01)
+                end
+            end)
+            Debris:AddItem(v29335, 3)
+        end
+
+        -- ── HyperEvent ───────────────────────────────────────────────────────
+        local l_l_char_65_1           = l_char_65
+        local l_l_HumanoidRootPart_21_1 = l_HumanoidRootPart_21
+        local l_l_UFW_2_1             = l_UFW_2
+
+        local function v29391()
+            task.spawn(function()
+                l_l_TweenService_66_1:Create(game.Lighting, TweenInfo.new(1.827, Enum.EasingStyle.Quad), {Brightness = 0, Ambient = Color3.fromRGB(0, 0, 0), OutdoorAmbient = Color3.fromRGB(25, 25, 25)}):Play()
+                l_l_TweenService_66_1:Create(game.Lighting, TweenInfo.new(0.65, Enum.EasingStyle.Quad), {ClockTime = 0}):Play()
+            end)
+            local l_spawn_28offset = CFrame.new(0, 0, -100) * CFrame.Angles(math.pi / 2, 0, 0)
+            local v29344  = l_QuickFX_17({FX = l_vfx_4.Pillar, Maid = v29224._maid, Anchor = l_CurrentCamera_37.CFrame * l_spawn_28offset})
+            local v29342  = l_v29157_0:Clone()
+            v29342.Name   = Players.LocalPlayer.Name .. "Rig"
+            Debris:AddItem(v29342, 10)
+            local v29345 = l_l_HumanoidRootPart_21_1.CFrame * CFrame.new(0.265625, -4.92593479, -57.606514)
+            local v29346 = v29224._maid:give(Instance.new("NumberValue"))
+            v29346.Value = -208
+            l_l_TweenService_66_1:Create(v29346, TweenInfo.new(3, Enum.EasingStyle.Sine), {Value = 0}):Play()
+            v29342:SetPrimaryPartCFrame(v29345)
+            v29342.Parent = l_EFP_17
+            v29224._maid:give(v29346.Changed:Connect(function()
+                v29342:SetPrimaryPartCFrame(v29345 * CFrame.new(0, 0, v29346.Value))
+            end))
+            local v29347 = getgenv().Animator6D(v29342, l_l_UFW_2_1.MainRig.AnimationId, 1, false)
+            v29347:SetTime(21.13)
+            for _, v29349 in pairs(v29342:GetChildren()) do
+                if v29349:IsA("Model") and v29349:FindFirstChild("Humanoid") then
+                    local l_Humanoid_30 = v29349:FindFirstChild("Humanoid")
+                    if l_Humanoid_30 then
+                        local v29351 = getgenv().Animator6D(l_Humanoid_30, l_l_UFW_2_1.EachRig.AnimationId, 1, false)
+                        v29351:SetTime(21.13)
+                    end
+                end
+            end
+            local v29352 = l_QuickFX_17({FX = l_vfx_4.Everything:Clone(), Maid = v29224._maid, Anchor = v29344.PrimaryPart.CFrame * CFrame.new(0, 500, 0)})
+            Debris:AddItem(v29352, 5)
+            local v29353 = v29224._maid:give(Instance.new("NumberValue"))
+            v29353.Value = 1
+            l_l_TweenService_66_1:Create(v29353, TweenInfo.new(3, Enum.EasingStyle.Sine), {Value = 4}):Play()
+            local v29354 = CFrame.Angles(math.pi / 2, -math.pi, 0)
+            task.spawn(function()
+                local v29355 = tick()
+                while tick() - v29355 < 5 do
+                    for _, v29357 in pairs(v29352:GetChildren()) do
+                        if v29357.Name == "Clouds" then
+                            for _, v29359 in pairs(v29357:GetChildren()) do
+                                if v29359.Name:find("Cloud") then v29359.Name = v29222:NextNumber(-2, -0.5) end
+                                v29359.CFrame = v29359.CFrame * CFrame.Angles(0, math.rad((tonumber(v29359.Name))), 0)
+                            end
+                        end
+                    end
+                    if tick() - v29355 < 3 then
+                        for _, v29361 in pairs(v29342:GetChildren()) do
+                            if v29361:IsA("Model") and v29361.Name ~= "1" then
+                                local l_HumanoidRootPart_22 = v29361:FindFirstChild("HumanoidRootPart")
+                                if l_HumanoidRootPart_22 then
+                                    l_HumanoidRootPart_22.RootJoint.C0 = v29354 * CFrame.new(v29222:NextNumber(-v29353.Value, v29353.Value), 0, 0)
+                                end
+                            end
+                        end
+                    else
+                        for _, v29367 in pairs(v29342:GetChildren()) do
+                            if v29367:IsA("Model") then
+                                local l_HumanoidRootPart_23 = v29367:FindFirstChild("HumanoidRootPart")
+                                if l_HumanoidRootPart_23 then l_HumanoidRootPart_23.RootJoint.C0 = v29354 end
+                            end
+                        end
+                    end
+                    l_dtwait_17(0.01)
+                end
+            end)
+            task.delay(2, function()
+                task.spawn(function()
+                    l_l_TweenService_66_1:Create(game.Lighting, TweenInfo.new(1.827, Enum.EasingStyle.Quad), {Brightness = 0, Ambient = Color3.fromRGB(0, 0, 0), OutdoorAmbient = Color3.fromRGB(25, 25, 25)}):Play()
+                    l_l_TweenService_66_1:Create(game.Lighting, TweenInfo.new(0.65, Enum.EasingStyle.Quad), {ClockTime = 0}):Play()
+                end)
+                local l_spawn_29 = v29224._maid:give(Instance.new("PointLight"))
+                l_spawn_29.Range = 5; l_spawn_29.Brightness = 5; l_spawn_29.Color = Color3.new(1, 0.411765, 0.305882)
+                local _rigTorsoParent = (v29342:FindFirstChild("1") and v29342["1"]:FindFirstChild("Torso")) or v29342:FindFirstChild("Torso") or v29342:FindFirstChild("UpperTorso")
+                if _rigTorsoParent then l_spawn_29.Parent = _rigTorsoParent end
+                local v29370data = {FX = l_vfx_4.Particles2, Maid = v29224._maid}
+                local _, v29374, _ = l_l_v29157_0_0.HumanoidRootPart.CFrame:ToOrientation()
+                v29370data.Anchor = CFrame.new(l_l_v29157_0_0.Torso.Position) * CFrame.Angles(0, v29374, 0)
+                local v29370fx = l_QuickFX_17(v29370data)
+                l_Able_17({FX = v29370fx, On = true})
+                l_l_TweenService_66_1:Create(v29344.PrimaryPart.Decal, TweenInfo.new(0.3, Enum.EasingStyle.Sine), {Transparency = 1}):Play()
+                l_dtwait_17(0.3)
+                v29344:Destroy()
+                l_LifeScale_15({FX = v29370fx, Scale = 0.5})
+                for _, v29377 in pairs(v29370fx:GetDescendants()) do
+                    if v29377:IsA("ParticleEmitter") then v29377.Rate = v29377.Rate * 0.5 end
+                end
+                l_dtwait_17(2.3)
+                l_Able_17({FX = v29370fx, On = false})
+                l_spawn_29:Destroy()
+            end)
+            local v29378 = {
+                [v29344.Inner] = {Scale = v29344.Inner.Mesh.Scale, Size = v29344.Inner.Size, CFrame = v29344.Inner.CFrame},
+                [v29344.Outer] = {CFrame = v29344.Outer.CFrame, Scale = v29344.Outer.Mesh.Scale, Size = v29344.Outer.Size},
+            }
+            local v29379 = v29224._maid:give(Instance.new("NumberValue"))
+            v29379.Value = 1
+            v29224._maid:give(v29379.Changed:Connect(function()
+                for v29380, v29381 in pairs(v29378) do
+                    if v29380.Parent then
+                        v29380.Mesh.Scale = Vector3.new(v29381.Scale.X, v29381.Scale.Y * v29379.Value, v29381.Scale.Z)
+                        v29380.CFrame = v29381.CFrame * CFrame.new(0, v29380.Size.Y * 0.5, 0)
+                    end
+                end
+            end))
+            v29379.Value = 0.1
+            l_l_TweenService_66_1:Create(v29379, TweenInfo.new(9, Enum.EasingStyle.Sine), {Value = 22}):Play()
+            for _, v29383 in pairs(v29344:GetChildren()) do
+                v29383.Decal.Transparency = 1
+                l_l_TweenService_66_1:Create(v29383.Decal, TweenInfo.new(0.5, Enum.EasingStyle.Sine), {Transparency = 0}):Play()
+            end
+            for v29384, _ in pairs(v29378) do
+                task.spawn(function()
+                    local l_Folder_15 = v29384:FindFirstChild("Folder")
+                    local l_Decal_901 = v29384:FindFirstChild("Decal")
+                    for _ = 1, 10 do
+                        if v29344:IsDescendantOf(game.Workspace) then
+                            for v29389 = 1, #l_Folder_15:GetChildren() do
+                                local v29390 = l_Folder_15:FindFirstChild((tostring(v29389))) or l_Folder_15:GetChildren()[#l_Folder_15:GetChildren()]
+                                if v29390 then l_Decal_901.Texture = v29390.Texture end
+                                l_dtwait_17(0.01)
+                            end
+                        else break end
+                    end
+                end)
+            end
+            Debris:AddItem(v29344, 4.6)
+        end
+
+        -- ── FinalPunch ───────────────────────────────────────────────────────
+        local l_l_RootPart_0_1 = l_RootPart_0
+        local function FinalPunch()
+            local l_PunchFX_1 = l_vfx_4.PunchFX
+            local v29395 = {}
+            task.spawn(function()
+                local v29396 = tick()
+                while tick() - v29396 < 5 do
+                    for _, v29398 in pairs(v29395) do
+                        if v29398.Parent then
+                            for _, v29400 in pairs(v29395) do
+                                v29400.OffsetStudsU = v29400.OffsetStudsU + 0.3
+                                v29400.OffsetStudsV = v29400.OffsetStudsV + 0.3
+                            end
+                        end
+                    end
+                    l_dtwait_17(0.01)
+                end
+            end)
+            local function v29405(v29401, v29402)
+                for _, v29404 in pairs(v29401:GetDescendants()) do
+                    if v29404:IsA("Texture") then
+                        table.insert(v29395, v29404)
+                        l_l_TweenService_66_1:Create(v29404, TweenInfo.new(v29402, Enum.EasingStyle.Sine), {Transparency = 1}):Play()
+                    end
+                end
+            end
+            local l_l_l_RootPart_0_1_0 = l_l_RootPart_0_1
+            local function v29413()
+                local v29408 = l_QuickFX_17({FX = l_PunchFX_1.Charge, Maid = v29224._maid, Anchor = l_l_l_RootPart_0_1_0.CFrame * CFrame.new(0, 0, -3)})
+                v29408:ScaleTo(3); l_Able_17({FX = v29408, On = true})
+                for _, v29410 in pairs(v29408:GetDescendants()) do
+                    if v29410:IsA("ParticleEmitter") then v29410.Rate = v29410.Rate * 5 end
+                end
+                Debris:AddItem(v29408, 0.15)
+                local v29411 = l_QuickFX_17({FX = l_PunchFX_1.EnabledPunch, Maid = v29224._maid, Anchor = l_l_l_RootPart_0_1_0.CFrame * CFrame.new(0, 0, -60)})
+                v29411:ScaleTo(4); l_Able_17({FX = v29411, On = true})
+                task.delay(0.25, function() l_Able_17({FX = v29411, On = false}) end)
+                local v29412 = l_PunchFX_1.Flash:Clone(); v29412:ScaleTo(4)
+                l_PlayMesh_17({Model = v29412, Anchor = l_l_l_RootPart_0_1_0.CFrame * CFrame.new(0, 0, 40), Info = TweenInfo.new(0.5, Enum.EasingStyle.Exponential)})
+                v29405(v29412, 0.5); Debris:AddItem(v29412, 0.15)
+            end
+            local function v29448()
+                local v29414 = v29224._maid:give(l_PunchFX_1.Shard:Clone()); v29414:ScaleTo(2)
+                l_PlayMesh_17({Model = v29414, T = 0, EndT = 0, Anchor = l_l_l_RootPart_0_1_0.CFrame * CFrame.new(0, 0, -66) * CFrame.Angles(0, math.pi / 2, 0), Info = TweenInfo.new(0.1, Enum.EasingStyle.Exponential)})
+                local v29415 = l_l_l_RootPart_0_1_0.CFrame * CFrame.new(0, 0, -10) * CFrame.Angles(math.pi / 2, 0, 0)
+                local v29416 = v29224._maid:give(l_PunchFX_1.StartThing:Clone()); v29416:PivotTo(v29415); v29416.Parent = l_EFP_17; Debris:AddItem(v29416, 2)
+                local v29417 = v29224._maid:give(l_PunchFX_1.EndThing:Clone()); v29417:PivotTo(v29415); v29417.Parent = l_EFP_17
+                task.spawn(function()
+                    v29224.Impact1 = v29224._maid:give(l_l_UFW_2_0:FindFirstChild("1"):Clone()); v29224.Impact1.Parent = game.Lighting; l_dtwait_17(0.07); v29224.Impact1:Destroy()
+                    v29224.Impact2 = v29224._maid:give(l_l_UFW_2_0:FindFirstChild("2"):Clone()); v29224.Impact2.Parent = game.Lighting; l_dtwait_17(0.07); v29224.Impact2:Destroy()
+                end)
+                for _, v29419 in pairs(v29416:GetChildren()) do
+                    local l_v29417_FirstChild_0 = v29417:FindFirstChild(v29419.Name)
+                    if l_v29417_FirstChild_0 then
+                        l_l_TweenService_66_1:Create(v29419, TweenInfo.new(0.1, Enum.EasingStyle.Sine), {Size = l_v29417_FirstChild_0.Size, CFrame = l_v29417_FirstChild_0.CFrame}):Play()
+                    end
+                end
+                Debris:AddItem(v29416, 0.05)
+                local v29421 = l_QuickFX_17({FX = l_PunchFX_1.groundsmoke, Anchor = l_l_l_RootPart_0_1_0.CFrame * CFrame.new(0, -l_l_l_RootPart_0_1_0.Size.Y * 1.5, 0) * CFrame.Angles(0, math.pi, 0), Maid = v29224._maid})
+                l_PlayAttachment_17(v29421); v29421:ScaleTo(2); l_LifeScale_15({FX = v29421, Scale = 2})
+                l_LifeScale_15({FX = v29421.PrimaryPart.emitLeft, Scale = 0.2}); l_LifeScale_15({FX = v29421.PrimaryPart.emitRight, Scale = 0.2})
+                task.spawn(function()
+                    for v29422 = 1, 3 do
+                        local v29423 = l_QuickFX_17({FX = l_PunchFX_1.Wind, Anchor = l_l_l_RootPart_0_1_0.CFrame * CFrame.new(0, -l_l_l_RootPart_0_1_0.Size.Y * 1.5, 10), Maid = v29224._maid})
+                        v29423:ScaleTo(v29422 * 2); l_LifeScale_15({FX = v29423, Scale = 0.5 * (v29422 * 0.8)}); l_PlayAttachment_17(v29423); l_dtwait_17(0.05)
+                    end
+                end)
+                local v29424 = v29224._maid:give(l_PunchFX_1.ohyea:Clone()); v29424:ScaleTo(8)
+                l_PlayMesh_17({Model = v29424, T = 0, Anchor = l_l_l_RootPart_0_1_0.CFrame * CFrame.new(0, 0, -20) * CFrame.Angles(0, -math.pi / 2, 0), Info = TweenInfo.new(3, Enum.EasingStyle.Exponential)})
+                local v29425 = l_PunchFX_1.Next:Clone(); v29425:ScaleTo(4)
+                l_PlayMesh_17({Model = v29425, T = 0, Anchor = l_l_l_RootPart_0_1_0.CFrame * CFrame.new(0, 0, -20) * CFrame.Angles(0, math.pi / 2, 0), Info = TweenInfo.new(4, Enum.EasingStyle.Exponential)})
+                local v29426 = l_PunchFX_1.BallThing:Clone(); v29426:ScaleTo(4)
+                l_PlayMesh_17({Model = v29426, Anchor = l_l_l_RootPart_0_1_0.CFrame * CFrame.new(0, 0, -20), Info = TweenInfo.new(3, Enum.EasingStyle.Exponential)})
+                v29405(v29426, 1)
+                task.spawn(function()
+                    for v29427 = 1, 3 do
+                        local v29428 = l_PunchFX_1.Test:Clone(); v29428:ScaleTo(8 - v29427 * 0.7)
+                        l_PlayMesh_17({Model = v29428, T = 0.3, Anchor = l_l_l_RootPart_0_1_0.CFrame * CFrame.new(0, 0, -10 * v29427 * 2) * CFrame.Angles(-math.pi / 2, -math.pi / 2, 0), Info = TweenInfo.new(0.4 * v29427, Enum.EasingStyle.Exponential)})
+                        l_dtwait_17(0.05)
+                    end
+                end)
+                local v29429 = l_QuickFX_17({FX = l_PunchFX_1.PunchBig, Maid = v29224._maid, Anchor = l_l_l_RootPart_0_1_0.CFrame * CFrame.new(0, 0, -100)})
+                v29429:ScaleTo(1.4); l_LifeScale_15({FX = v29429, Scale = 0.4}); l_PlayAttachment_17(v29429)
+                local v29430 = l_QuickFX_17({FX = l_PunchFX_1.ParticlesEnd, Anchor = l_l_l_RootPart_0_1_0.CFrame * CFrame.new(0, 5, 30), Maid = v29224._maid})
+                v29430:ScaleTo(2); l_LifeScale_15({FX = v29430, Scale = 2}); l_PlayAttachment_17(v29430)
+                local v29431 = l_QuickFX_17({FX = l_PunchFX_1.Emit, Anchor = l_l_l_RootPart_0_1_0.CFrame * CFrame.new(0, 0, -100), Maid = v29224._maid})
+                v29431:ScaleTo(1.4); l_LifeScale_15({FX = v29431, Scale = 2})
+                for _, v29433 in pairs(v29431:GetDescendants()) do
+                    if v29433:IsA("ParticleEmitter") then v29433:SetAttribute("EmitCount", v29433:GetAttribute("EmitCount") * 0.5) end
+                end
+                l_PlayAttachment_17(v29431)
+                local v29434 = l_QuickFX_17({FX = l_PunchFX_1.Beam, Maid = v29224._maid, Anchor = l_l_l_RootPart_0_1_0.CFrame * CFrame.new(0, 0, -240)})
+                v29434:ScaleTo(1.4)
+                for _, v29436 in pairs(v29434:GetDescendants()) do
+                    if v29436.Name:find("Far") then
+                        local l_CFrame_108 = v29436.CFrame; local v29438, v29439, v29440 = l_CFrame_108:ToOrientation()
+                        v29436.CFrame = CFrame.new(0, 0, -v29436.CFrame.Position.Z) * CFrame.Angles(v29438, v29439, v29440)
+                        l_l_TweenService_66_1:Create(v29436, TweenInfo.new(0.4, Enum.EasingStyle.Sine), {CFrame = l_CFrame_108}):Play()
+                    elseif v29436:IsA("Beam") then
+                        l_l_TweenService_66_1:Create(v29436, TweenInfo.new(3, Enum.EasingStyle.Sine), {TextureSpeed = 0}):Play()
+                        l_PlayTween_15(v29436, {Time = 2, EasingStyle = "Sine", Goal = {Transparency = NumberSequence.new({NumberSequenceKeypoint.new(0, 1), NumberSequenceKeypoint.new(1, 1)})}})
+                        Debris:AddItem(v29436, 2)
+                    end
+                end
+                local v29441 = l_QuickFX_17({FX = l_PunchFX_1.NewBeams, Maid = v29224._maid, Anchor = l_l_l_RootPart_0_1_0.CFrame * CFrame.new(0, 0, -44) * CFrame.Angles(0, 0, -math.pi / 6)})
+                v29441:ScaleTo(4); l_dtwait_17(0.5)
+                for _, v29443 in pairs(v29441:GetDescendants()) do
+                    if v29443.Name:find("Far") then
+                        local l_CFrame_109 = v29443.CFrame; local v29445, v29446, v29447 = l_CFrame_109:ToOrientation()
+                        v29443.CFrame = CFrame.new(0, 0, -v29443.CFrame.Position.Z) * CFrame.Angles(v29445, v29446, v29447)
+                        print(v29443.CFrame.Position)
+                        l_l_TweenService_66_1:Create(v29443, TweenInfo.new(0.4, Enum.EasingStyle.Sine), {CFrame = l_CFrame_109}):Play()
+                    elseif v29443:IsA("Beam") then
+                        l_l_TweenService_66_1:Create(v29443, TweenInfo.new(3, Enum.EasingStyle.Sine), {TextureSpeed = 0}):Play()
+                        l_PlayTween_15(v29443, {Time = 2, EasingStyle = "Sine", Goal = {Transparency = NumberSequence.new({NumberSequenceKeypoint.new(0, 1), NumberSequenceKeypoint.new(1, 1)})}})
+                        Debris:AddItem(v29443, 2)
+                    end
+                end
+                l_dtwait_17(1)
+            end
+            v29413()
+            if l_l_char_65_1 == Players.LocalPlayer.Character then
+                local v29449 = nil
+                if math.random(1, 100) == 40 then
+                    v29449 = Instance.new("ImageLabel")
+                    v29449.Parent           = Players.LocalPlayer.PlayerGui.ScreenGui
+                    v29449.Image            = "rbxassetid://133672115348464"
+                    v29449.Size             = UDim2.new(0, 0, 0, 1)
+                    v29449.ImageTransparency = 0
+                end
+                l_dtwait_17(0.15)
+                do
+                    local l_v29449_0 = v29449
+                    task.delay(0.05, function()
+                        if l_v29449_0 and l_v29449_0.Parent then
+                            l_v29449_0.Size = UDim2.new(1, 0, 1, 0)
+                            Debris:AddItem(l_v29449_0, 0.035)
+                        end
+                    end)
+                end
+            end
+            v29448()
+        end
+
+        -- ── Timed sequence ───────────────────────────────────────────────────
+        local l_l_UFW_2_2          = l_UFW_2
+        local l_l_TweenService_66_2 = l_TweenService_66
+        local l_l_RootPart_0_2     = l_RootPart_0
+
+        for v29502, v29503 in {
+            [0.9] = function()
+                v29195:Destroy(); l_ColorCorrectionEffect_6:Destroy(); v29196:Destroy(); v29197:Destroy()
+                v29194.Vignette.Visible = false
+                v29199.Floor.Decal.Transparency = 0; v29199.Wall2.Decal.Transparency = 0
+                v29199.light.SpotLight.Enabled  = true; v29199.light.SurfaceLight.Enabled = true
+                v29199.light2.SpotLight.Enabled = false
+                for _, v29463 in v29199["beams on floor"]:GetDescendants() do
+                    if v29463:IsA("Beam") then v29463.Enabled = true end
+                end
+                v29127.Speak(l_char_65, v29130[2])
+            end,
+            [2.483] = function()
+                v29199.Floor.Decal.Transparency = 1; v29199.Wall2:Destroy()
+                v29199["beams on floor"]:Destroy(); v29199.light:Destroy(); v29199.light2:Destroy()
+                v29199.BG.Transparency = 1
+                game.Lighting.ClockTime = 14.5; game.Lighting.EnvironmentDiffuseScale = 1
+                v29199.Floor2.floorspeed.runrunrun.Enabled  = true
+                v29199.Floor2.floorspeed.runrunrun2.Enabled = true
+                v29199.Floor2.Lines["12"].Enabled = true
+                v29199.UFWSkyroom.Transparency = 0
+                v29199.UFWSkyroom.Size = Vector3.new(400, 400, 400, 0)
+                local v29464
+                v29464 = l_RunService_1.Stepped:Connect(function()
+                    if not v29199.Parent or not v29199:FindFirstChild("UFWSkyroom") then
+                        v29464:Disconnect(); return
+                    else v29199.UFWSkyroom.Position = workspace.CurrentCamera.CFrame.Position; return end
+                end)
+                table.insert(v29129, v29464)
+                for _, v29466 in v29199.Bem.beams:GetChildren() do v29466.Enabled = true end
+                for _, v29468 in v29199.UFWSkyroom:GetChildren() do
+                    if v29468:IsA("ParticleEmitter") then v29468.Enabled = true
+                    else v29468.Transparency = 0 end
+                end
+                v29141(v29193, 3, 10, 0.04)
+                local l_BloomEffect_0 = Instance.new("BloomEffect")
+                l_BloomEffect_0.Intensity = 0.5; l_BloomEffect_0.Size = 56; l_BloomEffect_0.Threshold = 0.75; l_BloomEffect_0.Parent = game.Lighting
+                table.insert(v29129, l_BloomEffect_0)
+            end,
+            [4.033] = function()
+                v29199.Bem:Destroy()
+                for _, v29471 in v29199.Floor2.Lines2:GetChildren() do v29471.Enabled = true end
+                task.delay(0.167, function()
+                    v29199.Floor.Foot1.ToonLightning1:Emit(1)
+                    task.wait(0.367)
+                    v29199.Floor.Foot2.ToonLightning1:Emit(1)
+                end)
+                for _, v29473 in l_v29157_0:GetChildren() do
+                    if v29473:IsA("BasePart") then l_l_UFW_2_2.Aura:Clone().Parent = v29473 end
+                end
+            end,
+            [5.55] = function()
+                v29141(v29193, 11, 23, 0.03)
+            end,
+            [7.15] = function()
+                v29199.Floor2.floorspeed.runrunrun.Enabled  = false
+                v29199.Floor2.floorspeed.runrunrun2.Enabled = false
+                v29199.Floor2.Lines["12"].Enabled = false
+                for _, v29475 in v29199.Floor2.Lines2:GetChildren() do v29475.Enabled = false end
+            end,
+            [8.2] = function()
+                task.spawn(v29247)
+                for _, v29477 in l_l_UFW_2_2.FistSmear:GetChildren() do
+                    local v29478 = v29477:Clone(); v29478.Parent = l_v29157_0["Right Arm"]
+                    task.delay(1, function() v29478:Destroy() end)
+                end
+                task.wait(0.1)
+                v29199.Floor2.wave.ToonLightning1:Emit(1)
+                v29199.Floor2.wave.ToonLightning12:Emit(1)
+            end,
+            [8.85] = function()
+                task.spawn(v29263)
+            end,
+            [9.2] = function()
+                v29199.BG.Transparency = 0; v29199.BG.Color = Color3.new(0, 0, 0)
+                v29199.UFWSkyroom:Destroy()
+                v29199.KJWallBreak["1"].Transparency = 0
+                game.Lighting.EnvironmentDiffuseScale = 0
+                local v29479 = l_v29157_0:Clone()
+                v29479.HumanoidRootPart.Anchored = true
+                v29479.PrimaryPart = v29479.HumanoidRootPart
+                v29479:SetPrimaryPartCFrame(l_v29157_0.HumanoidRootPart.CFrame * CFrame.new(0, 0, -5) * CFrame.Angles(0, math.pi, 0))
+                v29479.Parent = game.Workspace
+                for _, v29481 in pairs(v29479:GetDescendants()) do
+                    if v29481:IsA("BasePart") then v29481.Transparency = 0.55 end
+                end
+                local v29482 = getgenv().Animator6D(v29479, l_l_UFW_2_2.Mirror.AnimationId, 1, false)
+                v29482:SetTime(12.25)
+                Debris:AddItem(v29479, 2)
+            end,
+            [9.5] = function()
+                task.spawn(v29274)
+            end,
+            [9.867] = function()
+                for _, v29484 in v29199.Gura.Slamy:GetChildren() do
+                    v29484:Emit(v29484:GetAttribute("EmitCount"))
+                end
+                task.spawn(function()
+                    v29194.Flexworks.Visible = true
+                    l_l_TweenService_66_2:Create(v29194.Flexworks, TweenInfo.new(0.1, Enum.EasingStyle.Exponential), {Size = UDim2.new(1.4, 0, 0.8, 0)}):Play()
+                    l_l_TweenService_66_2:Create(v29194.Flexworks, TweenInfo.new(0.6, Enum.EasingStyle.Elastic), {Position = UDim2.new(0.5, 0, 0.5, 0)}):Play()
+                    v29141(v29193, 24, 25, 0.03)
+                end)
+                v29199.KJWallBreak["3"].Transparency = 0
+                local l_ColorCorrectionEffect_7 = Instance.new("ColorCorrectionEffect")
+                l_ColorCorrectionEffect_7.Brightness = 0.75; l_ColorCorrectionEffect_7.TintColor = Color3.fromRGB(5, 240, 255); l_ColorCorrectionEffect_7.Parent = game.Lighting
+                l_l_TweenService_66_2:Create(l_ColorCorrectionEffect_7, TweenInfo.new(1), {Brightness = 0, TintColor = Color3.new(1, 1, 1)}):Play()
+                task.wait(1); l_ColorCorrectionEffect_7:Destroy()
+            end,
+            [11] = function()
+                task.spawn(function()
+                    l_l_TweenService_66_2:Create(game.Lighting, TweenInfo.new(1.827, Enum.EasingStyle.Quad), {Brightness = 0, Ambient = Color3.fromRGB(0, 0, 0), OutdoorAmbient = Color3.fromRGB(25, 25, 25)}):Play()
+                    l_l_TweenService_66_2:Create(game.Lighting, TweenInfo.new(0.65, Enum.EasingStyle.Quad), {ClockTime = 0}):Play()
+                end)
+                v29199.KJWallBreak:Destroy()
+                local l_RBClone = v29224._maid:give(l_l_UFW_2_2.RB:Clone())
+                l_RBClone:SetPrimaryPartCFrame(l_v29157_0.HumanoidRootPart.CFrame * CFrame.new(0.2122097611427307, -0.04167747497558594, -4.24620246887207))
+                l_RBClone.Parent = l_EFP_17
+                local v29488 = getgenv().Animator6D(l_RBClone.AnimationController, l_l_UFW_2_2.GlassBreak.AnimationId, 1, false)
+                v29488:Stop(); v29488 = getgenv().Animator6D(l_RBClone.AnimationController, l_l_UFW_2_2.GlassBreak.AnimationId, 1, false)
+                Debris:AddItem(l_RBClone, 3)
+                task.spawn(v29290)
+            end,
+            [11.9] = function()
+                task.spawn(v29314)
+            end,
+            [12.3] = function()
+                local v29489 = v29224._maid:give(l_l_UFW_2_2.Fade:Clone())
+                v29489.Parent = Players.LocalPlayer.PlayerGui
+                l_dtwait_17(0.05)
+                l_l_TweenService_66_2:Create(v29489.Fade, TweenInfo.new(0.3, Enum.EasingStyle.Sine), {BackgroundTransparency = 1}):Play()
+            end,
+            [12.83] = function()
+                task.spawn(v29338)
+            end,
+            [18.1] = function()
+                local v29490 = {}
+                for _, v29492 in pairs(l_v29157_0:GetDescendants()) do
+                    if v29492:IsA("BasePart") or v29492:IsA("Decal") then
+                        v29490[v29492] = v29492.Transparency; v29492.Transparency = 1
+                    elseif v29492:IsA("ParticleEmitter") and v29492.Name == "Aura" then
+                        v29492.Enabled = false
+                    end
+                end
+                task.spawn(v29391)
+                task.wait(5)
+                for v29493, v29494 in pairs(v29490) do v29493.Transparency = v29494 end
+            end,
+            [23] = function()
+                task.spawn(function()
+                    l_l_TweenService_66_2:Create(game.Lighting, TweenInfo.new(1.827, Enum.EasingStyle.Quad), {Brightness = 0, Ambient = Color3.fromRGB(0, 0, 0), OutdoorAmbient = Color3.fromRGB(25, 25, 25)}):Play()
+                    l_l_TweenService_66_2:Create(game.Lighting, TweenInfo.new(0.65, Enum.EasingStyle.Quad), {ClockTime = 0}):Play()
+                end)
+                for _, v29498 in v29129 do
+                    if typeof(v29498) == "RBXScriptConnection" then v29498:Disconnect()
+                    else v29498:Destroy() end
+                end
+                game.Workspace.CurrentCamera.CFrame      = l_l_RootPart_0_2.CFrame * CFrame.new(0, 3, 15)
+                game.Workspace.CurrentCamera.FieldOfView = 70
+            end,
+            [23.035] = function()
+                workspace.CurrentCamera.CameraType    = Enum.CameraType.Custom
+                workspace.CurrentCamera.FieldOfView   = 70
+                task.delay(1, function()
+                    for _, v29501 in v29129 do
+                        if typeof(v29501) == "RBXScriptConnection" then v29501:Disconnect()
+                        else v29501:Destroy() end
+                    end
+                    task.wait(0.4)
+                    getgenv().Animator6DStop()
+                    shared.SetCore(true)
+                    shared.BackpackVisibility(true, true)
+                end)
+                v12({Effect = "Camshake", Intensity = 40, Last = 5})
+            end,
+        } do
+            task.delay(v29502, v29503)
+        end
+    end
+end
+
+-- ─── Entry Point ──────────────────────────────────────────────────────────────
+-- Fires the Unlimited Flex Works VFX for the local player's current character.
+-- Expects:
+--   • v1090.char  — the character model running the ult
+--   • v1090.id    — the animation asset ID string (used for camera sync; omitted here)
+-- shared.loop, shared.SetCore, and shared.BackpackVisibility are all self-contained above.
+RunUnlimitedFlexWorksVFX({
+    Type = "Unlimited Flex Works VFX",
+    char = game.Players.LocalPlayer.Character,
+    id   = "0",  -- replace with the actual animation ID if needed
+})
