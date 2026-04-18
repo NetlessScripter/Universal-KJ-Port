@@ -779,6 +779,164 @@ function AnimPlayer:Stop(restore)
 end
 
 -- ─────────────────────────────────────────────
+--  PartCFramePlayer
+--  For rigs with NO Motor6D joints (e.g. CameraRigs).
+--  Animates Part CFrames directly, relative to the
+--  rig's PrimaryPart, using the same KFS pose data
+--  and easing system as AnimPlayer.
+--
+--  KFS pose names must match the Part names in the rig.
+-- ─────────────────────────────────────────────
+local PartCFramePlayer = {}
+PartCFramePlayer.__index = PartCFramePlayer
+
+function PartCFramePlayer.new(rig, kfs)
+    local primary = rig.PrimaryPart
+                 or rig:FindFirstChildWhichIsA("BasePart")
+    if not primary then return nil end
+
+    -- Map every BasePart in the rig by name
+    local partMap = {}
+    for _, part in ipairs(rig:GetDescendants()) do
+        if part:IsA("BasePart") then
+            partMap[part.Name] = part
+        end
+    end
+    -- Include the rig's direct BasePart children too
+    for _, child in ipairs(rig:GetChildren()) do
+        if child:IsA("BasePart") then
+            partMap[child.Name] = child
+        end
+    end
+
+    local frames, looped = parseSequence(kfs)
+    if not frames or #frames == 0 then return nil end
+
+    -- Only proceed if the KFS actually references parts that exist in the rig.
+    -- This prevents false positives when called on a Motor6D rig with a bad KFS.
+    local hasMatch = false
+    for _, frame in ipairs(frames) do
+        for joint in pairs(frame.Poses) do
+            if partMap[joint] then hasMatch = true; break end
+        end
+        if hasMatch then break end
+    end
+    if not hasMatch then return nil end
+
+    local self        = setmetatable({}, PartCFramePlayer)
+    self.rig          = rig
+    self.primary      = primary
+    self.partMap      = partMap
+    self.frames       = frames
+    self.looped       = looped
+    self.length       = frames[#frames].Time
+    self.time         = 0
+    self.speed        = 1
+    self.playing      = false
+    self.frameIndex   = 1
+    self.conn         = nil
+    self._completedCallback = nil
+
+    -- Save original CFrames for restore on Stop(true)
+    self.savedCFrames = {}
+    for name, part in pairs(partMap) do
+        self.savedCFrames[name] = part.CFrame
+    end
+
+    return self
+end
+
+function PartCFramePlayer:_sampleFrame()
+    local frames = self.frames
+    local n      = #frames
+
+    while self.frameIndex < n - 1
+        and frames[self.frameIndex + 1].Time <= self.time do
+        self.frameIndex += 1
+    end
+
+    local prevFrame = frames[self.frameIndex]
+    local nextFrame = frames[self.frameIndex + 1] or prevFrame
+    local segLen    = nextFrame.Time - prevFrame.Time
+    local alpha     = segLen > 0
+        and math.clamp((self.time - prevFrame.Time) / segLen, 0, 1)
+        or  1
+
+    -- Drive each part's CFrame relative to the primary part
+    local rootCF = self.primary.CFrame
+    for joint, pPose in pairs(prevFrame.Poses) do
+        local part = self.partMap[joint]
+        if part and part ~= self.primary then
+            local nPose = nextFrame.Poses[joint]
+            local pCF   = pPose.CFrame
+            local nCF   = (nPose and nPose.CFrame) or pCF
+            local ea    = easingAlpha(
+                alpha,
+                (nPose and nPose.EasingStyle)     or Enum.EasingStyle.Linear,
+                (nPose and nPose.EasingDirection) or Enum.EasingDirection.Out)
+            pcall(function() part.CFrame = rootCF * pCF:Lerp(nCF, ea) end)
+        end
+    end
+end
+
+function PartCFramePlayer:GetTimePosition()
+    return self.time
+end
+
+function PartCFramePlayer:SetTimePosition(t)
+    self.time = math.clamp(tonumber(t) or 0, 0, self.length)
+    self.frameIndex = 1
+    local frames, n = self.frames, #self.frames
+    while self.frameIndex < n - 1
+        and frames[self.frameIndex + 1].Time <= self.time do
+        self.frameIndex += 1
+    end
+    self:_sampleFrame()
+end
+
+function PartCFramePlayer:Play(speed, looped)
+    if self.playing then return end
+    self.playing = true
+    self.speed   = speed or 1
+    self.looped  = looped == nil and true or looped
+    self.time    = 0
+
+    self.conn = RunService.RenderStepped:Connect(function(dt)
+        if not self.playing then return end
+        self.time += dt * self.speed
+        if self.time >= self.length then
+            if self.looped then
+                self.time = self.time % self.length
+                self.frameIndex = 1
+            else
+                self.time = self.length
+                self:_sampleFrame()
+                self:Stop(false)
+                return
+            end
+        end
+        self:_sampleFrame()
+    end)
+end
+
+function PartCFramePlayer:Stop(restore)
+    self.playing = false
+    if self.conn then
+        self.conn:Disconnect()
+        self.conn = nil
+    end
+    if restore then
+        for name, cf in pairs(self.savedCFrames) do
+            local part = self.partMap[name]
+            if part then pcall(function() part.CFrame = cf end) end
+        end
+    end
+    if self._completedCallback then
+        pcall(self._completedCallback)
+    end
+end
+
+-- ─────────────────────────────────────────────
 --  Suppress / restore default animations
 -- ─────────────────────────────────────────────
 local function suppressDefaultAnims(char)
@@ -923,34 +1081,14 @@ getgenv().Animator6D = function(idOrInstance, speed, looped, targetChar)
             local anim = AnimPlayer.new(rigModel, kfs)
 
             if not anim then
-                -- Fallback: rig has no Motor6Ds — use Roblox's native LoadAnimation
-                local controller = rigInst:IsA("AnimationController") and rigInst
-                               or  rigInst:IsA("Humanoid") and rigInst
-                               or  (rigModel and (
-                                       rigModel:FindFirstChildOfClass("AnimationController")
-                                    or rigModel:FindFirstChildOfClass("Humanoid")))
-                if not controller then
-                    warn("[Animator6D] Rig mode: no Motor6Ds and no Animator found in", rigModel)
+                -- Fallback: CameraRig / no-Motor6D rig — drive Part CFrames directly.
+                -- PartCFramePlayer animates each Part relative to the rig's PrimaryPart
+                -- using the same KFS data and easing system as AnimPlayer.
+                anim = PartCFramePlayer.new(rigModel, kfs)
+                if not anim then
+                    warn("[Animator6D] Rig mode: no Motor6Ds and no matching parts found in", rigModel)
                     return
                 end
-                local animObj = Instance.new("Animation")
-                animObj.AnimationId = animId
-                local track = controller:LoadAnimation(animObj)
-                if isLooped ~= nil then track.Looped = isLooped end
-                track:Play()
-                track:AdjustSpeed(animSpeed)
-                -- Wrap native track into the same interface shape as AnimPlayer
-                local wrapper = {}
-                function wrapper:SetTimePosition(t) track.TimePosition = t end
-                function wrapper:GetTimePosition() return track.TimePosition end
-                function wrapper:Stop(_) track:Stop() end
-                ctrl._anim = wrapper
-                if ctrl._pendingTime then
-                    pcall(function() track.TimePosition = ctrl._pendingTime end)
-                    ctrl._pendingTime = nil
-                end
-                if ctrl._stopped then pcall(function() track:Stop() end) end
-                return
             end
 
             -- AnimPlayer path
@@ -1082,6 +1220,158 @@ getgenv().Animator6DStop = function(targetChar)
         pcall(function() anim:Stop(true) end)
         setActiveAnim(char, nil)
     end
+end
+
+-- ─────────────────────────────────────────────
+--  getgenv().LoadAnimation
+--  Drop-in replacement for Animator:LoadAnimation() /
+--  AnimationController:LoadAnimation() that uses our
+--  multi-method KFS loader to bypass permission issues.
+--
+--  Usage (mirrors native API exactly):
+--    local track = LoadAnimation(rig.AnimationController, animObj)
+--    local track = LoadAnimation(rig.AnimationController, "rbxassetid://123")
+--    track:Play()            -- start playback
+--    track:Play(0)           -- load pose without advancing (speed = 0)
+--    track.TimePosition = 3  -- seek
+--    track:Stop()
+--
+--  Works with:
+--    • Motor6D rigs    → AnimPlayer (same as Animator6D rig mode)
+--    • CameraRigs      → PartCFramePlayer (drives Part CFrames directly)
+--    • Humanoid rigs   → AnimPlayer (motor-driven, same as player anims)
+-- ─────────────────────────────────────────────
+getgenv().LoadAnimation = function(animatorOrController, animObjOrId, initSpeed, initLooped)
+
+    -- ── Resolve the rig model ──────────────────────────────────────────────
+    local rig
+    if typeof(animatorOrController) == "Instance" then
+        if animatorOrController:IsA("Animator") then
+            -- Animator sits inside AnimationController or Humanoid
+            local parent = animatorOrController.Parent
+            rig = parent and parent.Parent   -- go up to the Model
+        elseif animatorOrController:IsA("AnimationController")
+            or animatorOrController:IsA("Humanoid") then
+            rig = animatorOrController.Parent
+        elseif animatorOrController:IsA("Model") then
+            rig = animatorOrController
+        end
+    end
+
+    -- ── Resolve the animation ID ───────────────────────────────────────────
+    local rawId
+    if typeof(animObjOrId) == "Instance" and animObjOrId:IsA("Animation") then
+        rawId = cleanId(animObjOrId.AnimationId)
+    elseif animObjOrId ~= nil then
+        rawId = cleanId(tostring(animObjOrId))
+    end
+
+    if not rawId or rawId == "" then
+        warn("[LoadAnimation] Could not resolve animation ID from:", animObjOrId)
+        return nil
+    end
+
+    -- ── Pending-buffer controller ──────────────────────────────────────────
+    -- Callers can call :Play(), :Stop(), and set .TimePosition immediately;
+    -- actions are buffered and applied once the KFS finishes loading.
+    local ctrl = {
+        _anim         = nil,
+        _stopped      = false,
+        _pendingTime  = nil,
+        _pendingPlay  = false,
+        _pendingSpeed = initSpeed or 1,
+        _pendingLooped = initLooped,
+    }
+
+    function ctrl:SetTime(t)
+        if self._anim then
+            pcall(function() self._anim:SetTimePosition(t) end)
+        else
+            self._pendingTime = t
+        end
+    end
+
+    function ctrl:GetTime()
+        if self._anim then
+            local ok, t = pcall(function() return self._anim:GetTimePosition() end)
+            return (ok and type(t) == "number") and t or 0
+        end
+        return self._pendingTime or 0
+    end
+
+    function ctrl:Play(spd, lp)
+        self._pendingPlay  = true
+        self._pendingSpeed = spd ~= nil and spd or self._pendingSpeed or 1
+        if lp ~= nil then self._pendingLooped = lp end
+        if self._anim then
+            pcall(function()
+                self._anim:Play(self._pendingSpeed, self._pendingLooped)
+            end)
+        end
+    end
+
+    function ctrl:Stop()
+        self._stopped    = true
+        self._pendingPlay = false
+        if self._anim then
+            pcall(function() self._anim:Stop(false) end)
+        end
+    end
+
+    -- Property-style TimePosition proxy (mirrors native AnimationTrack)
+    local proxy = setmetatable({}, {
+        __index = function(_, k)
+            if k == "TimePosition" then return ctrl:GetTime() end
+            return ctrl[k]
+        end,
+        __newindex = function(_, k, v)
+            if k == "TimePosition" then ctrl:SetTime(v)
+            else ctrl[k] = v end
+        end,
+    })
+
+    -- ── Async KFS load + player construction ──────────────────────────────
+    task.spawn(function()
+        local kfs = loadKFS(rawId)
+        if not kfs or ctrl._stopped then return end
+
+        local player
+        if rig then
+            -- Motor6D rig (player characters, standard rigs)
+            player = AnimPlayer.new(rig, kfs)
+            -- CameraRig / no-Motor6D rig — drive Part CFrames directly
+            if not player then
+                player = PartCFramePlayer.new(rig, kfs)
+            end
+        end
+
+        if not player then
+            warn("[LoadAnimation] Could not build player for rig:", rig,
+                 "— no Motor6Ds and no matching part names in KFS")
+            return
+        end
+
+        ctrl._anim = player
+
+        -- Apply buffered seek
+        if ctrl._pendingTime then
+            pcall(function() player:SetTimePosition(ctrl._pendingTime) end)
+            ctrl._pendingTime = nil
+        end
+
+        -- If already stopped before load completed, just stop
+        if ctrl._stopped then
+            pcall(function() player:Stop(false) end)
+            return
+        end
+
+        -- Auto-play if :Play() was called before load completed
+        if ctrl._pendingPlay then
+            player:Play(ctrl._pendingSpeed, ctrl._pendingLooped)
+        end
+    end)
+
+    return proxy
 end
 
 -- ─────────────────────────────────────────────
