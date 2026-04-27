@@ -377,8 +377,8 @@ local function getCacheFilename(id)
     return "anim6d_kfcache_" .. id .. ".json"
 end
 
-local function serializeFrames(frames, looped)
-    local out = { Loop = looped, Frames = {} }
+local function serializeFrames(frames, looped, isR6)
+    local out = { Loop = looped, IsR6 = isR6, Frames = {} }
     for i, frame in ipairs(frames) do
         local poses = {}
         for joint, pose in pairs(frame.Poses) do
@@ -416,14 +416,16 @@ local function deserializeFrames(data)
         end
         frames[i] = { Time = f.Time, Poses = poses }
     end
-    return frames, data.Loop
+    -- IsR6 lives at the KeyframeData level in the JSON
+    return frames, data.Loop, data.IsR6
 end
 
-local function writeAnimCache(id, frames, looped)
+local function writeAnimCache(id, frames, looped, isR6)
     if not writefile then return end
     local ok, encoded = pcall(HttpService.JSONEncode, HttpService, {
         ID           = id,
-        KeyframeData = serializeFrames(frames, looped),
+        IsR6         = isR6,
+        KeyframeData = serializeFrames(frames, looped, isR6),
     })
     if ok and encoded then
         pcall(writefile, getCacheFilename(id), encoded)
@@ -431,20 +433,24 @@ local function writeAnimCache(id, frames, looped)
 end
 
 local function readAnimCache(id)
-    if not readfile or not isfile then return nil, nil end
+    if not readfile or not isfile then return nil, nil, nil end
     local filename = getCacheFilename(id)
-    if not isfile(filename) then return nil, nil end
+    if not isfile(filename) then return nil, nil, nil end
     local ok, raw = pcall(readfile, filename)
-    if not ok or not raw or raw == "" then return nil, nil end
+    if not ok or not raw or raw == "" then return nil, nil, nil end
     local ok2, data = pcall(HttpService.JSONDecode, HttpService, raw)
-    if not ok2 or not data then return nil, nil end
-    if tostring(data.ID) ~= tostring(id) then return nil, nil end
-    if not data.KeyframeData or not data.KeyframeData.Frames then return nil, nil end
-    return deserializeFrames(data.KeyframeData)
+    if not ok2 or not data then return nil, nil, nil end
+    if tostring(data.ID) ~= tostring(id) then return nil, nil, nil end
+    if not data.KeyframeData or not data.KeyframeData.Frames then return nil, nil, nil end
+    -- isR6 stored both at root and inside KeyframeData; prefer root
+    local isR6 = (data.IsR6 ~= nil) and data.IsR6 or data.KeyframeData.IsR6
+    local frames, looped = deserializeFrames(data.KeyframeData)
+    return frames, looped, isR6
 end
 
 -- ─────────────────────────────────────────────
 --  R6 motor name remapping
+--  (KFS pose name → Motor6D name)
 -- ─────────────────────────────────────────────
 local R6Map = {
     ["Head"]      = "Neck",
@@ -456,6 +462,123 @@ local R6Map = {
 }
 
 -- ─────────────────────────────────────────────
+--  R15 motor name remapping
+--  (KFS pose name → Motor6D name)
+-- ─────────────────────────────────────────────
+local R15Map = {
+    ["LowerTorso"]   = "Root",
+    ["UpperTorso"]   = "Waist",
+    ["Head"]         = "Neck",
+    ["LeftUpperArm"] = "LeftShoulder",
+    ["LeftLowerArm"] = "LeftElbow",
+    ["LeftHand"]     = "LeftWrist",
+    ["RightUpperArm"]= "RightShoulder",
+    ["RightLowerArm"]= "RightElbow",
+    ["RightHand"]    = "RightWrist",
+    ["LeftUpperLeg"] = "LeftHip",
+    ["LeftLowerLeg"] = "LeftKnee",
+    ["LeftFoot"]     = "LeftAnkle",
+    ["RightUpperLeg"]= "RightHip",
+    ["RightLowerLeg"]= "RightKnee",
+    ["RightFoot"]    = "RightAnkle",
+}
+
+-- Pose name sets used for animation-type detection
+local R15PoseNames = {
+    LowerTorso=true,  UpperTorso=true,
+    LeftUpperArm=true,  LeftLowerArm=true,  LeftHand=true,
+    RightUpperArm=true, RightLowerArm=true, RightHand=true,
+    LeftUpperLeg=true,  LeftLowerLeg=true,  LeftFoot=true,
+    RightUpperLeg=true, RightLowerLeg=true, RightFoot=true,
+}
+local R6PoseNames = {
+    Torso=true,
+    ["Left Arm"]=true, ["Right Arm"]=true,
+    ["Left Leg"]=true, ["Right Leg"]=true,
+}
+
+-- ─────────────────────────────────────────────
+--  Rig-type detection
+--  Returns "R15", "R6", or "Unknown"
+-- ─────────────────────────────────────────────
+local function detectRigType(rig)
+    -- Fast part-name check
+    if rig:FindFirstChild("UpperTorso") or rig:FindFirstChild("LowerTorso") then
+        return "R15"
+    end
+    if rig:FindFirstChild("Torso") then
+        return "R6"
+    end
+    -- Fallback: scan Motor6D names
+    for _, m in ipairs(rig:GetDescendants()) do
+        if m:IsA("Motor6D") then
+            local n = m.Name
+            if n == "LeftShoulder" or n == "RightShoulder" or n == "Waist" then
+                return "R15"
+            elseif n == "Left Shoulder" or n == "Right Shoulder" then
+                return "R6"
+            end
+        end
+    end
+    return "Unknown"
+end
+
+-- ─────────────────────────────────────────────
+--  Animation-type detection from a raw KFS
+--  Returns "R15", "R6", or "Unknown"
+-- ─────────────────────────────────────────────
+local function detectKFSType(kfs)
+    for _, frame in ipairs(kfs:GetKeyframes()) do
+        for _, pose in ipairs(frame:GetDescendants()) do
+            if pose:IsA("Pose") and pose.Weight > 0 then
+                if R15PoseNames[pose.Name] then return "R15" end
+                if R6PoseNames[pose.Name]  then return "R6"  end
+            end
+        end
+    end
+    return "Unknown"
+end
+
+-- ─────────────────────────────────────────────
+--  Animation-type detection from pre-parsed frames
+--  (used for disk-cache path where KFS is gone)
+-- ─────────────────────────────────────────────
+local function detectFramesType(frames)
+    for _, frame in ipairs(frames) do
+        for name in pairs(frame.Poses) do
+            if R15PoseNames[name] then return "R15" end
+            if R6PoseNames[name]  then return "R6"  end
+        end
+    end
+    return "Unknown"
+end
+
+-- ─────────────────────────────────────────────
+--  Rig-mismatch notification
+--  Uses Roblox's built-in toast system.
+-- ─────────────────────────────────────────────
+local function showNotification(title, text, duration)
+    pcall(function()
+        game:GetService("StarterGui"):SetCore("SendNotification", {
+            Title    = title,
+            Text     = text,
+            Duration = duration or 8,
+        })
+    end)
+end
+
+-- Returns nil if rig and animation types are compatible.
+-- Returns an error string if they are not.
+local function getRigMismatchError(animType, rigType)
+    if animType == "R15" and rigType == "R6" then
+        return "You cannot load an R15 animation on an R6 rig, please try this with an R15 rig"
+    elseif animType == "R6" and rigType == "R15" then
+        return "You cannot load an R6 animation on an R15 rig, please try this with an R6 rig"
+    end
+    return nil
+end
+
+-- ─────────────────────────────────────────────
 --  KeyframeSequence parser
 -- ─────────────────────────────────────────────
 local function parseSequence(kfs)
@@ -464,6 +587,9 @@ local function parseSequence(kfs)
     end
     assert(kfs and kfs:IsA("KeyframeSequence"),
         "Expected KeyframeSequence, got: " .. tostring(kfs and kfs.ClassName))
+
+    -- Detect animation type before iterating all poses
+    local animType = detectKFSType(kfs)
 
     local frames = {}
     for _, frame in ipairs(kfs:GetKeyframes()) do
@@ -481,7 +607,7 @@ local function parseSequence(kfs)
     end
 
     table.sort(frames, function(a, b) return a.Time < b.Time end)
-    return frames, kfs.Loop
+    return frames, kfs.Loop, animType
 end
 
 -- ─────────────────────────────────────────────
@@ -499,7 +625,7 @@ local function buildMotorMap(rig)
 end
 
 local function findMotor(name, map, lower)
-    local mapped = R6Map[name] or name
+    local mapped = R6Map[name] or R15Map[name] or name
     return map[mapped] or lower[mapped:lower()]
 end
 
@@ -597,7 +723,7 @@ AnimPlayer.__index = AnimPlayer
 function AnimPlayer.new(rig, kfs)
     local self   = setmetatable({}, AnimPlayer)
     self.rig     = rig
-    self.frames, self.looped = parseSequence(kfs)
+    self.frames, self.looped, self.animType = parseSequence(kfs)
 
     if not self.frames or #self.frames == 0 then
         warn("[Animator6D] KFS has no keyframes — asset may not have fully loaded")
@@ -635,12 +761,20 @@ end
 
 -- Builds an AnimPlayer directly from pre-deserialized frames, bypassing
 -- parseSequence entirely. Used when loading from disk cache.
-function AnimPlayer.fromFrames(rig, frames, looped)
+function AnimPlayer.fromFrames(rig, frames, looped, isR6)
     if not frames or #frames == 0 then return nil end
     local self      = setmetatable({}, AnimPlayer)
     self.rig        = rig
     self.frames     = frames
     self.looped     = looped
+    -- Recover animType from isR6 flag (stored in JSON cache)
+    if isR6 == true then
+        self.animType = "R6"
+    elseif isR6 == false then
+        self.animType = "R15"
+    else
+        self.animType = detectFramesType(frames)
+    end
     self.map, self.lower = buildMotorMap(rig)
     self.length     = frames[#frames].Time
     self.time       = 0
@@ -779,6 +913,164 @@ function AnimPlayer:Stop(restore)
 end
 
 -- ─────────────────────────────────────────────
+--  PartCFramePlayer
+--  For rigs with NO Motor6D joints (e.g. CameraRigs).
+--  Animates Part CFrames directly, relative to the
+--  rig's PrimaryPart, using the same KFS pose data
+--  and easing system as AnimPlayer.
+--
+--  KFS pose names must match the Part names in the rig.
+-- ─────────────────────────────────────────────
+local PartCFramePlayer = {}
+PartCFramePlayer.__index = PartCFramePlayer
+
+function PartCFramePlayer.new(rig, kfs)
+    local primary = rig.PrimaryPart
+                 or rig:FindFirstChildWhichIsA("BasePart")
+    if not primary then return nil end
+
+    -- Map every BasePart in the rig by name
+    local partMap = {}
+    for _, part in ipairs(rig:GetDescendants()) do
+        if part:IsA("BasePart") then
+            partMap[part.Name] = part
+        end
+    end
+    -- Include the rig's direct BasePart children too
+    for _, child in ipairs(rig:GetChildren()) do
+        if child:IsA("BasePart") then
+            partMap[child.Name] = child
+        end
+    end
+
+    local frames, looped = parseSequence(kfs)
+    if not frames or #frames == 0 then return nil end
+
+    -- Only proceed if the KFS actually references parts that exist in the rig.
+    -- This prevents false positives when called on a Motor6D rig with a bad KFS.
+    local hasMatch = false
+    for _, frame in ipairs(frames) do
+        for joint in pairs(frame.Poses) do
+            if partMap[joint] then hasMatch = true; break end
+        end
+        if hasMatch then break end
+    end
+    if not hasMatch then return nil end
+
+    local self        = setmetatable({}, PartCFramePlayer)
+    self.rig          = rig
+    self.primary      = primary
+    self.partMap      = partMap
+    self.frames       = frames
+    self.looped       = looped
+    self.length       = frames[#frames].Time
+    self.time         = 0
+    self.speed        = 1
+    self.playing      = false
+    self.frameIndex   = 1
+    self.conn         = nil
+    self._completedCallback = nil
+
+    -- Save original CFrames for restore on Stop(true)
+    self.savedCFrames = {}
+    for name, part in pairs(partMap) do
+        self.savedCFrames[name] = part.CFrame
+    end
+
+    return self
+end
+
+function PartCFramePlayer:_sampleFrame()
+    local frames = self.frames
+    local n      = #frames
+
+    while self.frameIndex < n - 1
+        and frames[self.frameIndex + 1].Time <= self.time do
+        self.frameIndex += 1
+    end
+
+    local prevFrame = frames[self.frameIndex]
+    local nextFrame = frames[self.frameIndex + 1] or prevFrame
+    local segLen    = nextFrame.Time - prevFrame.Time
+    local alpha     = segLen > 0
+        and math.clamp((self.time - prevFrame.Time) / segLen, 0, 1)
+        or  1
+
+    -- Drive each part's CFrame relative to the primary part
+    local rootCF = self.primary.CFrame
+    for joint, pPose in pairs(prevFrame.Poses) do
+        local part = self.partMap[joint]
+        if part and part ~= self.primary then
+            local nPose = nextFrame.Poses[joint]
+            local pCF   = pPose.CFrame
+            local nCF   = (nPose and nPose.CFrame) or pCF
+            local ea    = easingAlpha(
+                alpha,
+                (nPose and nPose.EasingStyle)     or Enum.EasingStyle.Linear,
+                (nPose and nPose.EasingDirection) or Enum.EasingDirection.Out)
+            pcall(function() part.CFrame = rootCF * pCF:Lerp(nCF, ea) end)
+        end
+    end
+end
+
+function PartCFramePlayer:GetTimePosition()
+    return self.time
+end
+
+function PartCFramePlayer:SetTimePosition(t)
+    self.time = math.clamp(tonumber(t) or 0, 0, self.length)
+    self.frameIndex = 1
+    local frames, n = self.frames, #self.frames
+    while self.frameIndex < n - 1
+        and frames[self.frameIndex + 1].Time <= self.time do
+        self.frameIndex += 1
+    end
+    self:_sampleFrame()
+end
+
+function PartCFramePlayer:Play(speed, looped)
+    if self.playing then return end
+    self.playing = true
+    self.speed   = speed or 1
+    self.looped  = looped == nil and true or looped
+    self.time    = 0
+
+    self.conn = RunService.RenderStepped:Connect(function(dt)
+        if not self.playing then return end
+        self.time += dt * self.speed
+        if self.time >= self.length then
+            if self.looped then
+                self.time = self.time % self.length
+                self.frameIndex = 1
+            else
+                self.time = self.length
+                self:_sampleFrame()
+                self:Stop(false)
+                return
+            end
+        end
+        self:_sampleFrame()
+    end)
+end
+
+function PartCFramePlayer:Stop(restore)
+    self.playing = false
+    if self.conn then
+        self.conn:Disconnect()
+        self.conn = nil
+    end
+    if restore then
+        for name, cf in pairs(self.savedCFrames) do
+            local part = self.partMap[name]
+            if part then pcall(function() part.CFrame = cf end) end
+        end
+    end
+    if self._completedCallback then
+        pcall(self._completedCallback)
+    end
+end
+
+-- ─────────────────────────────────────────────
 --  Suppress / restore default animations
 -- ─────────────────────────────────────────────
 local function suppressDefaultAnims(char)
@@ -829,7 +1121,138 @@ local function setActiveAnim(char, anim)
     end
 end
 
+-- ─────────────────────────────────────────────
+--  Rig-mode helpers
+--  Used when Animator6D is called with a rig
+--  (Model / Humanoid / AnimationController) as
+--  arg1 and an animation asset ID as arg2.
+-- ─────────────────────────────────────────────
+local function isRigTarget(inst)
+    return inst:IsA("Model")
+        or inst:IsA("Humanoid")
+        or inst:IsA("AnimationController")
+end
+
+local function resolveRigModel(inst)
+    if inst:IsA("Model") then return inst end
+    return inst.Parent  -- Humanoid / AnimationController → parent Model
+end
+
 getgenv().Animator6D = function(idOrInstance, speed, looped, targetChar)
+
+    -- ── Rig / AnimationController mode ──────────────────────────────────
+    -- Signature : Animator6D(rigOrController, animId, animSpeed, isLooped)
+    -- Detected  : arg1 is a Model/Humanoid/AnimationController AND
+    --             arg2 is an animation asset ID (string or number).
+    -- Returns   : { SetTime(t), Stop() }  — available immediately; calls
+    --             are buffered if the KFS hasn't finished loading yet.
+    if typeof(idOrInstance) == "Instance" and isRigTarget(idOrInstance)
+       and (typeof(speed) == "string" or typeof(speed) == "number") then
+
+        local rigInst  = idOrInstance
+        local rawId    = tostring(speed)
+        local animId   = rawId:find("^%d+$")
+                         and ("rbxassetid://" .. rawId)
+                         or  rawId
+        local animSpeed = looped or 1
+        local isLooped  = targetChar   -- 4th positional arg maps to looped flag
+
+        local rigModel = resolveRigModel(rigInst)
+
+        -- Pending-buffer controller: SetTime / Stop may be called before
+        -- the async KFS load completes; we queue them here.
+        local ctrl = { _anim = nil, _stopped = false, _pendingTime = nil }
+
+        function ctrl:SetTime(t)
+            if self._anim then
+                pcall(function() self._anim:SetTimePosition(t) end)
+            else
+                self._pendingTime = t
+            end
+        end
+
+        function ctrl:Stop()
+            self._stopped = true
+            if self._anim then
+                pcall(function() self._anim:Stop(false) end)
+            end
+        end
+
+        -- Returns the current playback position in seconds.
+        -- Falls back to the pending-seek value (or 0) if the KFS hasn't loaded yet.
+        function ctrl:GetTime()
+            if self._anim then
+                local ok, t = pcall(function() return self._anim:GetTimePosition() end)
+                return (ok and type(t) == "number") and t or 0
+            end
+            return self._pendingTime or 0
+        end
+
+        -- Proxy so callers can use ctrl.TimePosition exactly like a native AnimationTrack:
+        --   ctrl.TimePosition = 3          -- seek
+        --   local t = ctrl.TimePosition    -- read
+        local ctrlProxy = setmetatable({}, {
+            __index = function(_, k)
+                if k == "TimePosition" then
+                    return ctrl:GetTime()
+                end
+                return ctrl[k]
+            end,
+            __newindex = function(_, k, v)
+                if k == "TimePosition" then
+                    ctrl:SetTime(v)
+                else
+                    ctrl[k] = v
+                end
+            end,
+        })
+
+        task.spawn(function()
+            local kfs = loadKFS(cleanId(animId))
+            if not kfs or ctrl._stopped then return end
+
+            -- Rig-type mismatch check
+            local rigType  = detectRigType(rigModel)
+            local animType = detectKFSType(kfs)
+            local mismatch = getRigMismatchError(animType, rigType)
+            if mismatch then
+                showNotification("Animation Error", mismatch)
+                warn("[Animator6D] Rig mode: " .. mismatch)
+                return
+            end
+
+            -- Primary path: Motor6D-driven AnimPlayer (same system as player anims)
+            local anim = AnimPlayer.new(rigModel, kfs)
+
+            if not anim then
+                -- Fallback: CameraRig / no-Motor6D rig — drive Part CFrames directly.
+                -- PartCFramePlayer animates each Part relative to the rig's PrimaryPart
+                -- using the same KFS data and easing system as AnimPlayer.
+                anim = PartCFramePlayer.new(rigModel, kfs)
+                if not anim then
+                    warn("[Animator6D] Rig mode: no Motor6Ds and no matching parts found in", rigModel)
+                    return
+                end
+            end
+
+            -- AnimPlayer path
+            if isLooped ~= nil then anim.looped = isLooped end
+            ctrl._anim = anim
+            anim:Play(animSpeed, isLooped)
+
+            if ctrl._pendingTime then
+                pcall(function() anim:SetTimePosition(ctrl._pendingTime) end)
+                ctrl._pendingTime = nil
+            end
+            if ctrl._stopped then
+                pcall(function() anim:Stop(false) end)
+            end
+        end)
+
+        return ctrlProxy
+    end
+
+    -- ── Standard player-character mode (original behaviour below) ───────
     local char = targetChar or character  -- play on targetChar, fall back to local player
     local kfs
 
@@ -837,6 +1260,16 @@ getgenv().Animator6D = function(idOrInstance, speed, looped, targetChar)
         kfs = findKFS(idOrInstance)
         if not kfs then
             warn("[Animator6D] No KeyframeSequence found in provided Instance")
+            return
+        end
+
+        -- Rig-type mismatch check
+        local rigType  = detectRigType(char)
+        local animType = detectKFSType(kfs)
+        local mismatch = getRigMismatchError(animType, rigType)
+        if mismatch then
+            showNotification("Animation Error", mismatch)
+            warn("[Animator6D] " .. mismatch)
             return
         end
 
@@ -869,8 +1302,20 @@ getgenv().Animator6D = function(idOrInstance, speed, looped, targetChar)
             local cId = cleanId(idOrInstance)
 
             -- ── Disk cache check ──────────────────────────────────────────
-            local cachedFrames, cachedLoop = readAnimCache(cId)
+            local cachedFrames, cachedLoop, cachedIsR6 = readAnimCache(cId)
             if cachedFrames then
+                -- Rig-type mismatch check using cached IsR6 flag
+                local rigType  = detectRigType(char)
+                local animType = (cachedIsR6 == true) and "R6"
+                             or (cachedIsR6 == false) and "R15"
+                             or detectFramesType(cachedFrames)
+                local mismatch = getRigMismatchError(animType, rigType)
+                if mismatch then
+                    showNotification("Animation Error", mismatch)
+                    warn("[Animator6D] " .. mismatch)
+                    return
+                end
+
                 suppressDefaultAnims(char)
                 local prev = getActiveAnim(char)
                 if prev then
@@ -878,7 +1323,7 @@ getgenv().Animator6D = function(idOrInstance, speed, looped, targetChar)
                     setActiveAnim(char, nil)
                 end
 
-                local anim = AnimPlayer.fromFrames(char, cachedFrames, cachedLoop)
+                local anim = AnimPlayer.fromFrames(char, cachedFrames, cachedLoop, cachedIsR6)
                 if anim then
                     local isLooped = looped == nil and cachedLoop or looped
                     if not isLooped then
@@ -901,6 +1346,16 @@ getgenv().Animator6D = function(idOrInstance, speed, looped, targetChar)
                 return
             end
 
+            -- Rig-type mismatch check using live KFS
+            local rigType  = detectRigType(char)
+            local animType = detectKFSType(fetched)
+            local mismatch = getRigMismatchError(animType, rigType)
+            if mismatch then
+                showNotification("Animation Error", mismatch)
+                warn("[Animator6D] " .. mismatch)
+                return
+            end
+
             suppressDefaultAnims(char)
             local prev = getActiveAnim(char)
             if prev then
@@ -917,8 +1372,9 @@ getgenv().Animator6D = function(idOrInstance, speed, looped, targetChar)
                 return
             end
 
-            -- ── Write disk cache ──────────────────────────────────────────
-            writeAnimCache(cId, anim.frames, anim.looped or false)
+            -- ── Write disk cache (includes IsR6) ──────────────────────────
+            local isR6Flag = (anim.animType == "R6")
+            writeAnimCache(cId, anim.frames, anim.looped or false, isR6Flag)
 
             local isLooped = looped == nil and true or looped
             if not isLooped then
@@ -941,6 +1397,158 @@ getgenv().Animator6DStop = function(targetChar)
         pcall(function() anim:Stop(true) end)
         setActiveAnim(char, nil)
     end
+end
+
+-- ─────────────────────────────────────────────
+--  getgenv().LoadAnimation
+--  Drop-in replacement for Animator:LoadAnimation() /
+--  AnimationController:LoadAnimation() that uses our
+--  multi-method KFS loader to bypass permission issues.
+--
+--  Usage (mirrors native API exactly):
+--    local track = LoadAnimation(rig.AnimationController, animObj)
+--    local track = LoadAnimation(rig.AnimationController, "rbxassetid://123")
+--    track:Play()            -- start playback
+--    track:Play(0)           -- load pose without advancing (speed = 0)
+--    track.TimePosition = 3  -- seek
+--    track:Stop()
+--
+--  Works with:
+--    • Motor6D rigs    → AnimPlayer (same as Animator6D rig mode)
+--    • CameraRigs      → PartCFramePlayer (drives Part CFrames directly)
+--    • Humanoid rigs   → AnimPlayer (motor-driven, same as player anims)
+-- ─────────────────────────────────────────────
+getgenv().LoadAnimation = function(animatorOrController, animObjOrId, initSpeed, initLooped)
+
+    -- ── Resolve the rig model ──────────────────────────────────────────────
+    local rig
+    if typeof(animatorOrController) == "Instance" then
+        if animatorOrController:IsA("Animator") then
+            -- Animator sits inside AnimationController or Humanoid
+            local parent = animatorOrController.Parent
+            rig = parent and parent.Parent   -- go up to the Model
+        elseif animatorOrController:IsA("AnimationController")
+            or animatorOrController:IsA("Humanoid") then
+            rig = animatorOrController.Parent
+        elseif animatorOrController:IsA("Model") then
+            rig = animatorOrController
+        end
+    end
+
+    -- ── Resolve the animation ID ───────────────────────────────────────────
+    local rawId
+    if typeof(animObjOrId) == "Instance" and animObjOrId:IsA("Animation") then
+        rawId = cleanId(animObjOrId.AnimationId)
+    elseif animObjOrId ~= nil then
+        rawId = cleanId(tostring(animObjOrId))
+    end
+
+    if not rawId or rawId == "" then
+        warn("[LoadAnimation] Could not resolve animation ID from:", animObjOrId)
+        return nil
+    end
+
+    -- ── Pending-buffer controller ──────────────────────────────────────────
+    -- Callers can call :Play(), :Stop(), and set .TimePosition immediately;
+    -- actions are buffered and applied once the KFS finishes loading.
+    local ctrl = {
+        _anim         = nil,
+        _stopped      = false,
+        _pendingTime  = nil,
+        _pendingPlay  = false,
+        _pendingSpeed = initSpeed or 1,
+        _pendingLooped = initLooped,
+    }
+
+    function ctrl:SetTime(t)
+        if self._anim then
+            pcall(function() self._anim:SetTimePosition(t) end)
+        else
+            self._pendingTime = t
+        end
+    end
+
+    function ctrl:GetTime()
+        if self._anim then
+            local ok, t = pcall(function() return self._anim:GetTimePosition() end)
+            return (ok and type(t) == "number") and t or 0
+        end
+        return self._pendingTime or 0
+    end
+
+    function ctrl:Play(spd, lp)
+        self._pendingPlay  = true
+        self._pendingSpeed = spd ~= nil and spd or self._pendingSpeed or 1
+        if lp ~= nil then self._pendingLooped = lp end
+        if self._anim then
+            pcall(function()
+                self._anim:Play(self._pendingSpeed, self._pendingLooped)
+            end)
+        end
+    end
+
+    function ctrl:Stop()
+        self._stopped    = true
+        self._pendingPlay = false
+        if self._anim then
+            pcall(function() self._anim:Stop(false) end)
+        end
+    end
+
+    -- Property-style TimePosition proxy (mirrors native AnimationTrack)
+    local proxy = setmetatable({}, {
+        __index = function(_, k)
+            if k == "TimePosition" then return ctrl:GetTime() end
+            return ctrl[k]
+        end,
+        __newindex = function(_, k, v)
+            if k == "TimePosition" then ctrl:SetTime(v)
+            else ctrl[k] = v end
+        end,
+    })
+
+    -- ── Async KFS load + player construction ──────────────────────────────
+    task.spawn(function()
+        local kfs = loadKFS(rawId)
+        if not kfs or ctrl._stopped then return end
+
+        local player
+        if rig then
+            -- Motor6D rig (player characters, standard rigs)
+            player = AnimPlayer.new(rig, kfs)
+            -- CameraRig / no-Motor6D rig — drive Part CFrames directly
+            if not player then
+                player = PartCFramePlayer.new(rig, kfs)
+            end
+        end
+
+        if not player then
+            warn("[LoadAnimation] Could not build player for rig:", rig,
+                 "— no Motor6Ds and no matching part names in KFS")
+            return
+        end
+
+        ctrl._anim = player
+
+        -- Apply buffered seek
+        if ctrl._pendingTime then
+            pcall(function() player:SetTimePosition(ctrl._pendingTime) end)
+            ctrl._pendingTime = nil
+        end
+
+        -- If already stopped before load completed, just stop
+        if ctrl._stopped then
+            pcall(function() player:Stop(false) end)
+            return
+        end
+
+        -- Auto-play if :Play() was called before load completed
+        if ctrl._pendingPlay then
+            player:Play(ctrl._pendingSpeed, ctrl._pendingLooped)
+        end
+    end)
+
+    return proxy
 end
 
 -- ─────────────────────────────────────────────
