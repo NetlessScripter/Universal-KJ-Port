@@ -554,6 +554,11 @@ getgenv().SoundEvent.Completed = CompletedSignal.Event
 -- Sounds are never stopped when a new one starts — they stack.
 local activeSounds = {}
 
+-- Tracks looped sounds by their clean ID.
+-- Sound6DLoop writes here; Sound6DSL reads from here.
+-- { [cleanId] = soundInstance }
+local loopedSounds = {}
+
 -- Points to the most recently started sound for the Volume/Time APIs.
 local currentSound = nil
 
@@ -747,7 +752,105 @@ getgenv().Sound6DS = function(idOrInstance)
 end
 
 -- ─────────────────────────────────────────────
---  Volume API
+--  Sound6DLoop  —  play a looped sound, no stacking
+--
+--  If the sound is already looping it does nothing.
+--  The instance is tracked in loopedSounds so
+--  Sound6DSL can stop it cleanly.
+--
+--  Usage:
+--    Sound6DLoop("rbxassetid://18997258379")
+--    Sound6DLoop("18997258379")
+-- ─────────────────────────────────────────────
+getgenv().Sound6DLoop = function(idOrInstance, volume)
+    local id
+    if typeof(idOrInstance) == "Instance" and idOrInstance:IsA("Sound") then
+        id = cleanId(idOrInstance.SoundId)
+    else
+        id = cleanId(tostring(idOrInstance))
+    end
+
+    -- Already looping — do nothing
+    local existing = loopedSounds[id]
+    if existing and existing.Parent and existing.Playing then return end
+
+    task.spawn(function()
+        local urlOverride, loaded = resolveId(id)
+        if not loaded then
+            warn("[Sound6DLoop] All fetch methods failed for id:", id)
+            return
+        end
+
+        local sound = Instance.new("Sound")
+        sound.SoundId = urlOverride or ("rbxassetid://" .. id)
+        sound.Volume  = volume or 1
+        sound.Looped  = true
+        sound.Parent  = workspace.CurrentCamera
+
+        pcall(function() if makesafe       then makesafe(sound)       end end)
+        pcall(function() if protect_gui    then protect_gui(sound)    end end)
+
+        local deadline = tick() + 3
+        while not sound.IsLoaded and tick() < deadline do
+            task.wait(0.05)
+        end
+
+        if not sound.IsLoaded or sound.TimeLength == 0 then
+            warn("[Sound6DLoop] Sound failed to load for id:", id)
+            sound:Destroy()
+            return
+        end
+
+        -- Double-check: another call may have started it while we were loading
+        local check = loopedSounds[id]
+        if check and check.Parent and check.Playing then
+            sound:Destroy()
+            return
+        end
+
+        loopedSounds[id] = sound
+        table.insert(activeSounds, sound)
+        currentSound = sound
+        sound:Play()
+    end)
+end
+
+-- ─────────────────────────────────────────────
+--  Sound6DSL  —  stop a looped sound by ID
+--
+--  Only touches the looped sound registered under
+--  that ID. All other active sounds keep playing.
+--
+--  Usage:
+--    Sound6DSL("rbxassetid://18997258379")
+--    Sound6DSL("18997258379")
+-- ─────────────────────────────────────────────
+getgenv().Sound6DSL = function(idOrInstance)
+    local id
+    if typeof(idOrInstance) == "Instance" and idOrInstance:IsA("Sound") then
+        id = cleanId(idOrInstance.SoundId)
+    else
+        id = cleanId(tostring(idOrInstance))
+    end
+
+    local sound = loopedSounds[id]
+    if not sound then return end
+
+    loopedSounds[id] = nil
+    pcall(function() sound:Stop() end)
+    pcall(function() sound:Destroy() end)
+
+    -- Remove from activeSounds
+    for i = #activeSounds, 1, -1 do
+        if activeSounds[i] == sound then
+            table.remove(activeSounds, i)
+        end
+    end
+
+    if currentSound == sound then
+        currentSound = activeSounds[#activeSounds] or nil
+    end
+end
 --
 --  Functional:
 --    Sound6DSetVolume(0.5)
