@@ -692,6 +692,61 @@ getgenv().Sound6DStop = function()
 end
 
 -- ─────────────────────────────────────────────
+--  Sound6DS  —  stop a SINGLE sound by ID
+--
+--  Unlike Sound6DStop (which nukes everything),
+--  this only stops sounds whose SoundId matches
+--  the provided asset ID.
+--
+--  Usage:
+--    Sound6DS("rbxassetid://18997258379")
+--    Sound6DS("18997258379")          -- bare ID also works
+--    Sound6DS(someSoundInstance)      -- or pass the instance directly
+-- ─────────────────────────────────────────────
+getgenv().Sound6DS = function(idOrInstance)
+    -- Instance overload: stop by direct reference
+    if typeof(idOrInstance) == "Instance" then
+        if not idOrInstance:IsA("Sound") then
+            warn("[Sound6DS] Provided Instance is not a Sound")
+            return
+        end
+        for i = #activeSounds, 1, -1 do
+            if activeSounds[i] == idOrInstance then
+                pcall(function() activeSounds[i]:Stop() end)
+                pcall(function() activeSounds[i]:Destroy() end)
+                if currentSound == activeSounds[i] then
+                    currentSound = nil
+                end
+                table.remove(activeSounds, i)
+            end
+        end
+        -- Repair currentSound pointer to the latest still-alive sound
+        if not currentSound then
+            currentSound = activeSounds[#activeSounds] or nil
+        end
+        return
+    end
+
+    -- ID overload: stop all sounds whose SoundId matches
+    local targetId = cleanId(tostring(idOrInstance))
+    for i = #activeSounds, 1, -1 do
+        local s = activeSounds[i]
+        if s and cleanId(s.SoundId) == targetId then
+            pcall(function() s:Stop() end)
+            pcall(function() s:Destroy() end)
+            if currentSound == s then
+                currentSound = nil
+            end
+            table.remove(activeSounds, i)
+        end
+    end
+    -- Repair currentSound pointer
+    if not currentSound then
+        currentSound = activeSounds[#activeSounds] or nil
+    end
+end
+
+-- ─────────────────────────────────────────────
 --  Volume API
 --
 --  Functional:
