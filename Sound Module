@@ -214,67 +214,53 @@ local function isUrl(str)
         and (str:sub(1, 7) == "http://" or str:sub(1, 8) == "https://")
 end
 
--- Downloads a raw OGG from a URL, saves it to disk, and returns a
--- getcustomasset/getsynasset path Roblox can actually play.
--- Returns nil on failure.
-local function resolveOggUrl(url)
-    -- Derive a safe local filename from the last path segment of the URL
-    local rawName = url:match("([^/]+)$") or "sound6d_url.ogg"
-    -- URL-decode %20 etc. so filenames are human-readable
-    rawName = rawName:gsub("%%(%x%x)", function(h) return string.char(tonumber(h, 16)) end)
-    local filename = sanitizeName(rawName)
-    if not filename:match("%.ogg$") then
-        filename = filename .. ".ogg"
+-- Creates, preloads, and plays a Sound directly from a raw OGG URL.
+-- Roblox accepts HTTPS URLs as SoundId natively — no downloading needed.
+-- Returns the Sound instance or nil on failure.
+local function spawnUrlSound(url, volume, looped)
+    local sound = Instance.new("Sound")
+    sound.SoundId = url
+    sound.Volume  = volume or 1
+    sound.Looped  = looped == nil and false or looped
+    sound.Parent  = workspace.CurrentCamera
+
+    pcall(function() if makesafe    then makesafe(sound)    end end)
+    pcall(function() if protect_gui then protect_gui(sound) end end)
+
+    -- Preload so it's ready to play immediately
+    pcall(function()
+        ContentProvider:PreloadAsync({ sound })
+    end)
+
+    local deadline = tick() + 3
+    while not sound.IsLoaded and tick() < deadline do
+        task.wait(0.05)
     end
 
-    -- Serve from disk cache if already downloaded
-    if isfile and isfile(filename) then
-        local g = getsynasset or getcustomasset
-        if g then
-            local ok, path = pcall(g, filename)
-            if ok and path then return path end
-        end
-    end
-
-    -- Download: game:HttpGet first (follows redirects + auth cookies)
-    local data
-    local ok1, body1 = pcall(function() return game:HttpGet(url) end)
-    if ok1 and body1 and #body1 >= 128 then
-        data = body1
-    end
-
-    -- Fallback: execRequest
-    if not data then
-        local res = execRequest({ Url = url, Method = "GET" })
-        if res and res.Body and #res.Body >= 128 then
-            data = res.Body
-        end
-    end
-
-    if not data then
-        warn("[Sound6D] OGG URL download failed:", url)
+    if not sound.IsLoaded or sound.TimeLength == 0 then
+        warn("[Sound6D] URL sound failed to load:", url)
+        sound:Destroy()
         return nil
     end
 
-    -- Validate OGG magic bytes
-    if data:sub(1, 4) ~= "OggS" then
-        warn("[Sound6D] URL response is not a valid OGG file:", url)
-        return nil
+    table.insert(activeSounds, sound)
+    currentSound = sound
+    sound:Play()
+
+    if not sound.Looped then
+        sound.Ended:Connect(function()
+            CompletedSignal:Fire()
+            for i, s in ipairs(activeSounds) do
+                if s == sound then table.remove(activeSounds, i) break end
+            end
+            if currentSound == sound then
+                currentSound = activeSounds[#activeSounds] or nil
+            end
+            sound:Destroy()
+        end)
     end
 
-    -- Write to disk
-    if writefile then
-        pcall(writefile, filename, data)
-    end
-
-    local g = getsynasset or getcustomasset
-    if g and isfile and isfile(filename) then
-        local ok2, path = pcall(g, filename)
-        if ok2 and path then return path end
-    end
-
-    warn("[Sound6D] Could not resolve local asset path for:", filename)
-    return nil
+    return sound
 end
 
 -- Fetch the human-readable name of an asset from Roblox's economy API.
@@ -748,14 +734,9 @@ getgenv().Sound6D = function(idOrInstance, volume, looped)
         end
 
     elseif isUrl(idOrInstance) then
-        -- // Direct OGG URL path — download, cache to disk, play via getcustomasset
+        -- // Direct OGG URL — set as SoundId natively, preload, play
         task.spawn(function()
-            local urlOverride = resolveOggUrl(idOrInstance)
-            if not urlOverride then
-                warn("[Sound6D] Failed to load OGG from URL:", idOrInstance)
-                return
-            end
-            local snd = spawnSound(idOrInstance, volume, looped, urlOverride)
+            local snd = spawnUrlSound(idOrInstance, volume, looped)
             if snd then
                 urlSounds[idOrInstance] = snd
             end
