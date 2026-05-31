@@ -1256,7 +1256,58 @@ getgenv().Animator6D = function(idOrInstance, speed, looped, targetChar)
     local char = targetChar or character  -- play on targetChar, fall back to local player
     local kfs
 
-    if typeof(idOrInstance) == "Instance" then
+    if type(idOrInstance) == "table" then
+        -- ── JSON table branch ─────────────────────────────────────────────
+        -- Caller passed a pre-decoded JSON table (or a raw JSON string).
+        -- Accepts two shapes:
+        --   Shape A (full cache file):  { ID, IsR6, KeyframeData = { Loop, IsR6, Frames } }
+        --   Shape B (bare KFD):         { Loop, IsR6, Frames }
+        task.spawn(function()
+            local kd = idOrInstance.KeyframeData or idOrInstance
+            if not kd or not kd.Frames then
+                warn("[Animator6D] JSON table is missing Frames — cannot play")
+                return
+            end
+
+            local frames, parsedLoop, parsedIsR6 = deserializeFrames(kd)
+
+            local rigType  = detectRigType(char)
+            local animType = (parsedIsR6 == true)  and "R6"
+                          or (parsedIsR6 == false) and "R15"
+                          or detectFramesType(frames)
+            local mismatch = getRigMismatchError(animType, rigType)
+            if mismatch then
+                showNotification("Animation Error", mismatch)
+                warn("[Animator6D] " .. mismatch)
+                return
+            end
+
+            suppressDefaultAnims(char)
+            local prev = getActiveAnim(char)
+            if prev then
+                pcall(function() prev:Stop(true) end)
+                setActiveAnim(char, nil)
+            end
+
+            local isLooped = looped ~= nil and looped or (parsedLoop == true)
+            local anim = AnimPlayer.fromFrames(char, frames, isLooped, parsedIsR6)
+            if not anim then
+                warn("[Animator6D] AnimPlayer.fromFrames failed for JSON table")
+                return
+            end
+
+            if not isLooped then
+                anim._completedCallback = function()
+                    restoreDefaultAnims(char)
+                    CompletedSignal:Fire()
+                end
+            end
+
+            setActiveAnim(char, anim)
+            anim:Play(speed or 1, isLooped)
+        end)
+
+    elseif typeof(idOrInstance) == "Instance" then
         kfs = findKFS(idOrInstance)
         if not kfs then
             warn("[Animator6D] No KeyframeSequence found in provided Instance")
