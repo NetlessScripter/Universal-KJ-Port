@@ -871,15 +871,39 @@ function AnimPlayer:SetTimePosition(t)
     self:_sampleFrame()
 end
 
+-- ─────────────────────────────────────────────
+--  Pause / Resume
+--  Pause freezes the animation on its current pose
+--  (the pose stays applied; nothing is restored and
+--  the completed callback does NOT fire).  Resume
+--  continues from the exact time it was paused at.
+-- ─────────────────────────────────────────────
+function AnimPlayer:Pause()
+    if not self.playing or self.paused then return false end
+    self.paused = true
+    return true
+end
+
+function AnimPlayer:Resume()
+    if not self.playing or not self.paused then return false end
+    self.paused = false
+    return true
+end
+
+function AnimPlayer:IsPaused()
+    return self.paused == true
+end
+
 function AnimPlayer:Play(speed, looped)
     if self.playing then return end
     self.playing = true
+    self.paused  = false
     self.speed   = speed or 1
     self.looped  = looped == nil and true or looped
     self.time    = 0
 
     self.conn = RunService.RenderStepped:Connect(function(dt)
-        if not self.playing then return end
+        if not self.playing or self.paused then return end
         self.time += dt * self.speed
         if self.time >= self.length then
             if self.looped then
@@ -898,6 +922,7 @@ end
 
 function AnimPlayer:Stop(restore)
     self.playing = false
+    self.paused  = false
     if self.conn then
         self.conn:Disconnect()
         self.conn = nil
@@ -1028,15 +1053,39 @@ function PartCFramePlayer:SetTimePosition(t)
     self:_sampleFrame()
 end
 
+-- ─────────────────────────────────────────────
+--  Pause / Resume
+--  Pause freezes the animation on its current pose
+--  (the pose stays applied; nothing is restored and
+--  the completed callback does NOT fire).  Resume
+--  continues from the exact time it was paused at.
+-- ─────────────────────────────────────────────
+function PartCFramePlayer:Pause()
+    if not self.playing or self.paused then return false end
+    self.paused = true
+    return true
+end
+
+function PartCFramePlayer:Resume()
+    if not self.playing or not self.paused then return false end
+    self.paused = false
+    return true
+end
+
+function PartCFramePlayer:IsPaused()
+    return self.paused == true
+end
+
 function PartCFramePlayer:Play(speed, looped)
     if self.playing then return end
     self.playing = true
+    self.paused  = false
     self.speed   = speed or 1
     self.looped  = looped == nil and true or looped
     self.time    = 0
 
     self.conn = RunService.RenderStepped:Connect(function(dt)
-        if not self.playing then return end
+        if not self.playing or self.paused then return end
         self.time += dt * self.speed
         if self.time >= self.length then
             if self.looped then
@@ -1055,6 +1104,7 @@ end
 
 function PartCFramePlayer:Stop(restore)
     self.playing = false
+    self.paused  = false
     if self.conn then
         self.conn:Disconnect()
         self.conn = nil
@@ -1171,6 +1221,22 @@ getgenv().Animator6D = function(idOrInstance, speed, looped, targetChar)
             end
         end
 
+        function ctrl:Pause()
+            if self._anim then
+                pcall(function() self._anim:Pause() end)
+            else
+                self._pendingPause = true
+            end
+        end
+
+        function ctrl:Resume()
+            if self._anim then
+                pcall(function() self._anim:Resume() end)
+            else
+                self._pendingPause = false
+            end
+        end
+
         function ctrl:Stop()
             self._stopped = true
             if self._anim then
@@ -1239,6 +1305,7 @@ getgenv().Animator6D = function(idOrInstance, speed, looped, targetChar)
             if isLooped ~= nil then anim.looped = isLooped end
             ctrl._anim = anim
             anim:Play(animSpeed, isLooped)
+            if ctrl._pendingPause then pcall(function() anim:Pause() end) end
 
             if ctrl._pendingTime then
                 pcall(function() anim:SetTimePosition(ctrl._pendingTime) end)
@@ -1538,6 +1605,22 @@ getgenv().LoadAnimation = function(animatorOrController, animObjOrId, initSpeed,
         end
     end
 
+    function ctrl:Pause()
+        if self._anim then
+            pcall(function() self._anim:Pause() end)
+        else
+            self._pendingPause = true
+        end
+    end
+
+    function ctrl:Resume()
+        if self._anim then
+            pcall(function() self._anim:Resume() end)
+        else
+            self._pendingPause = false
+        end
+    end
+
     function ctrl:Stop()
         self._stopped    = true
         self._pendingPlay = false
@@ -1596,6 +1679,7 @@ getgenv().LoadAnimation = function(animatorOrController, animObjOrId, initSpeed,
         -- Auto-play if :Play() was called before load completed
         if ctrl._pendingPlay then
             player:Play(ctrl._pendingSpeed, ctrl._pendingLooped)
+            if ctrl._pendingPause then pcall(function() player:Pause() end) end
         end
     end)
 
@@ -1615,6 +1699,41 @@ end
 --    Animation.TimePosition = 1.25   -- jump to 1.25 s
 --    print(Animation.TimePosition)   -- read current position
 -- ─────────────────────────────────────────────
+-- Pause / resume the currently playing player-character animation.
+--   Animator6DPause()    -- freeze on the current pose
+--   Animator6DResume()   -- continue from where it was frozen
+--   Animator6DIsPaused() -- true while frozen
+-- Optional arg = target character (defaults to the local player's character).
+-- Also exposed as Animation.Pause() / Animation.Resume() / Animation.IsPaused().
+getgenv().Animator6DPause = function(targetChar)
+    local anim = getActiveAnim(targetChar or character)
+    if anim then
+        local ok, res = pcall(function() return anim:Pause() end)
+        return ok and res or false
+    end
+    warn("[Animator6D] Animator6DPause: no animation is currently active")
+    return false
+end
+
+getgenv().Animator6DResume = function(targetChar)
+    local anim = getActiveAnim(targetChar or character)
+    if anim then
+        local ok, res = pcall(function() return anim:Resume() end)
+        return ok and res or false
+    end
+    warn("[Animator6D] Animator6DResume: no animation is currently active")
+    return false
+end
+
+getgenv().Animator6DIsPaused = function(targetChar)
+    local anim = getActiveAnim(targetChar or character)
+    return anim ~= nil and anim.paused == true
+end
+
+getgenv().Animation.Pause    = getgenv().Animator6DPause
+getgenv().Animation.Resume   = getgenv().Animator6DResume
+getgenv().Animation.IsPaused = getgenv().Animator6DIsPaused
+
 getgenv().Animator6DSetTime = function(t)
     local anim = getgenv().currentAnimator6D
     if anim then
