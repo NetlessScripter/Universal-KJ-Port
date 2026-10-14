@@ -903,7 +903,13 @@ function AnimPlayer:Play(speed, looped)
     self.time    = 0
 
     self.conn = RunService.RenderStepped:Connect(function(dt)
-        if not self.playing or self.paused then return end
+        if not self.playing then return end
+        if self.paused then
+            -- time is frozen, but the held pose is re-applied every frame so nothing
+            -- else that touches the joints can knock the freeze loose
+            self:_sampleFrame()
+            return
+        end
         self.time += dt * self.speed
         if self.time >= self.length then
             if self.looped then
@@ -1085,7 +1091,13 @@ function PartCFramePlayer:Play(speed, looped)
     self.time    = 0
 
     self.conn = RunService.RenderStepped:Connect(function(dt)
-        if not self.playing or self.paused then return end
+        if not self.playing then return end
+        if self.paused then
+            -- time is frozen, but the held pose is re-applied every frame so nothing
+            -- else that touches the joints can knock the freeze loose
+            self:_sampleFrame()
+            return
+        end
         self.time += dt * self.speed
         if self.time >= self.length then
             if self.looped then
@@ -1705,8 +1717,17 @@ end
 --   Animator6DIsPaused() -- true while frozen
 -- Optional arg = target character (defaults to the local player's character).
 -- Also exposed as Animation.Pause() / Animation.Resume() / Animation.IsPaused().
+-- Finds the active animation. With no target it tries the CURRENT character first,
+-- then the character captured when the module loaded (stale after a respawn).
+local function resolveActiveAnim(targetChar)
+    if targetChar then return getActiveAnim(targetChar) end
+    return getActiveAnim(player.Character)
+        or getActiveAnim(character)
+        or getgenv().currentAnimator6D
+end
+
 getgenv().Animator6DPause = function(targetChar)
-    local anim = getActiveAnim(targetChar or character)
+    local anim = resolveActiveAnim(targetChar)
     if anim then
         local ok, res = pcall(function() return anim:Pause() end)
         return ok and res or false
@@ -1716,7 +1737,7 @@ getgenv().Animator6DPause = function(targetChar)
 end
 
 getgenv().Animator6DResume = function(targetChar)
-    local anim = getActiveAnim(targetChar or character)
+    local anim = resolveActiveAnim(targetChar)
     if anim then
         local ok, res = pcall(function() return anim:Resume() end)
         return ok and res or false
@@ -1726,7 +1747,7 @@ getgenv().Animator6DResume = function(targetChar)
 end
 
 getgenv().Animator6DIsPaused = function(targetChar)
-    local anim = getActiveAnim(targetChar or character)
+    local anim = resolveActiveAnim(targetChar)
     return anim ~= nil and anim.paused == true
 end
 
