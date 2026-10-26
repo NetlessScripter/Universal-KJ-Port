@@ -11,6 +11,22 @@ local player    = Players.LocalPlayer
 local character = player.Character or player.CharacterAdded:Wait()
 local humanoid  = character:WaitForChild("Humanoid")
 
+-- Who does a call apply to?
+--   * no target argument      -> the local player's CURRENT character (not the one captured
+--                                at load, which goes stale after a respawn)
+--   * a valid Model passed    -> that character (e.g. the player who used the attack)
+--   * nil / non-Model passed  -> nobody. A missing character must never silently fall back to
+--                                the local player, or someone else's animation lands on us.
+local function localCharacter()
+    return player.Character or character
+end
+
+local function resolveTarget(argc, targetChar)
+    if argc == 0 then return localCharacter() end
+    if typeof(targetChar) == "Instance" and targetChar:IsA("Model") then return targetChar end
+    return nil
+end
+
 -- ─────────────────────────────────────────────
 --  Cache
 -- ─────────────────────────────────────────────
@@ -1155,9 +1171,11 @@ end
 
 -- ─────────────────────────────────────────────
 --  Animation.Completed signal
---  Fires when a non-looped animation finishes.
---  Usage:
---    getgenv().Animation.Completed:Connect(function()
+--  Fires when a non-looped animation finishes, for ANY character.
+--  The character whose animation finished is passed as the argument,
+--  so check it if you only care about one player:
+--    getgenv().Animation.Completed:Connect(function(finishedChar)
+--        if finishedChar ~= myChar then return end
 --        print("done!")
 --    end)
 -- ─────────────────────────────────────────────
@@ -1178,7 +1196,7 @@ end
 
 local function setActiveAnim(char, anim)
     getgenv().currentAnimator6D_chars[char] = anim
-    if char == character then
+    if char == localCharacter() then
         getgenv().currentAnimator6D = anim  -- backward compat
     end
 end
@@ -1200,7 +1218,11 @@ local function resolveRigModel(inst)
     return inst.Parent  -- Humanoid / AnimationController → parent Model
 end
 
-getgenv().Animator6D = function(idOrInstance, speed, looped, targetChar)
+getgenv().Animator6D = function(idOrInstance, speed, looped, ...)
+    -- 4th arg = target character (player-character mode) or the looped flag (rig mode).
+    -- select("#") tells "not passed" (-> us) apart from "passed as nil" (-> nobody).
+    local targetChar  = ...
+    local targetGiven = select("#", ...) > 0
 
     -- ── Rig / AnimationController mode ──────────────────────────────────
     -- Signature : Animator6D(rigOrController, animId, animSpeed, isLooped)
@@ -1332,7 +1354,16 @@ getgenv().Animator6D = function(idOrInstance, speed, looped, targetChar)
     end
 
     -- ── Standard player-character mode (original behaviour below) ───────
-    local char = targetChar or character  -- play on targetChar, fall back to local player
+    local char
+    if targetGiven then
+        if typeof(targetChar) ~= "Instance" or not targetChar:IsA("Model") then
+            warn("[Animator6D] target character is nil or invalid - not playing (it will not fall back to the local player)")
+            return
+        end
+        char = targetChar
+    else
+        char = localCharacter()  -- no target passed = the local player
+    end
     local kfs
 
     if type(idOrInstance) == "table" then
@@ -1378,7 +1409,7 @@ getgenv().Animator6D = function(idOrInstance, speed, looped, targetChar)
             if not isLooped then
                 anim._completedCallback = function()
                     restoreDefaultAnims(char)
-                    CompletedSignal:Fire()
+                    CompletedSignal:Fire(char)
                 end
             end
 
@@ -1420,7 +1451,7 @@ getgenv().Animator6D = function(idOrInstance, speed, looped, targetChar)
         if not isLooped then
             anim._completedCallback = function()
                 restoreDefaultAnims(char)
-                CompletedSignal:Fire()
+                CompletedSignal:Fire(char)
             end
         end
 
@@ -1459,7 +1490,7 @@ getgenv().Animator6D = function(idOrInstance, speed, looped, targetChar)
                     if not isLooped then
                         anim._completedCallback = function()
                             restoreDefaultAnims(char)
-                            CompletedSignal:Fire()
+                            CompletedSignal:Fire(char)
                         end
                     end
                     setActiveAnim(char, anim)
@@ -1510,7 +1541,7 @@ getgenv().Animator6D = function(idOrInstance, speed, looped, targetChar)
             if not isLooped then
                 anim._completedCallback = function()
                     restoreDefaultAnims(char)
-                    CompletedSignal:Fire()
+                    CompletedSignal:Fire(char)
                 end
             end
 
@@ -1520,8 +1551,9 @@ getgenv().Animator6D = function(idOrInstance, speed, looped, targetChar)
     end
 end
 
-getgenv().Animator6DStop = function(targetChar)
-    local char = targetChar or character
+getgenv().Animator6DStop = function(...)
+    local char = resolveTarget(select("#", ...), (...))
+    if not char then return end  -- a target was passed but it's nil/invalid: stop nothing (never ours)
     local anim = getActiveAnim(char)
     if anim then
         pcall(function() anim:Stop(true) end)
@@ -1719,15 +1751,19 @@ end
 -- Also exposed as Animation.Pause() / Animation.Resume() / Animation.IsPaused().
 -- Finds the active animation. With no target it tries the CURRENT character first,
 -- then the character captured when the module loaded (stale after a respawn).
-local function resolveActiveAnim(targetChar)
-    if targetChar then return getActiveAnim(targetChar) end
+local function resolveActiveAnim(...)
+    local argc = select("#", ...)
+    if argc > 0 then
+        local char = resolveTarget(argc, (...))
+        return char and getActiveAnim(char) or nil  -- a passed target never falls back to ours
+    end
     return getActiveAnim(player.Character)
         or getActiveAnim(character)
         or getgenv().currentAnimator6D
 end
 
-getgenv().Animator6DPause = function(targetChar)
-    local anim = resolveActiveAnim(targetChar)
+getgenv().Animator6DPause = function(...)
+    local anim = resolveActiveAnim(...)
     if anim then
         local ok, res = pcall(function() return anim:Pause() end)
         return ok and res or false
@@ -1736,8 +1772,8 @@ getgenv().Animator6DPause = function(targetChar)
     return false
 end
 
-getgenv().Animator6DResume = function(targetChar)
-    local anim = resolveActiveAnim(targetChar)
+getgenv().Animator6DResume = function(...)
+    local anim = resolveActiveAnim(...)
     if anim then
         local ok, res = pcall(function() return anim:Resume() end)
         return ok and res or false
@@ -1746,8 +1782,8 @@ getgenv().Animator6DResume = function(targetChar)
     return false
 end
 
-getgenv().Animator6DIsPaused = function(targetChar)
-    local anim = resolveActiveAnim(targetChar)
+getgenv().Animator6DIsPaused = function(...)
+    local anim = resolveActiveAnim(...)
     return anim ~= nil and anim.paused == true
 end
 
