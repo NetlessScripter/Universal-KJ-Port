@@ -1,0 +1,906 @@
+local t1 = {}
+local library = require(game.ReplicatedStorage.library)
+local PlayAttachment, Maid, PlayTween, _ = library.PlayAttachment, library.Maid, library.PlayTween, library.CamShake
+local _, dtwait, EFP, PlayMesh = library.PlayFlipBook, library.dtwait, library.EFP, library.PlayMesh
+local _, _, _, Able = library.Impact, library.GlassLight, library.RaiseZIndex, library.Able
+local LifeScale, QuickFX, _, _ = library.LifeScale, library.QuickFX, library.QuickWeld, library.Yield
+local _, _, _ = library.ProcessPart, library.WeldObject, library.Bezier
+local vfx = game:GetService("ReplicatedStorage").Emotes.VFX.VfxMods.FS.vfx
+local t2 = {}
+
+t2.__index = t2
+
+local v1 = Random.new()
+local TweenService = game:GetService("TweenService")
+
+game:GetService("PhysicsService")
+
+local _ = game.Workspace.Camera
+
+t1.FirstEvent = function(p1) -- line: 34
+    -- upvalues: PlayAttachment (copy), Maid (copy), PlayTween (copy), dtwait (copy), EFP (copy), PlayMesh (copy), Able (copy), LifeScale (copy), QuickFX (copy), vfx (copy), t2 (copy), v1 (copy), TweenService (copy)
+    local Char = p1.Char
+    local v2 = false
+
+    if Char ~= game.Players.LocalPlayer.Character then
+        v2 = true
+    end
+
+    shared.NerfVfx({
+        Script = script,
+        Char = Char
+    })
+
+    local CleanupTable, RealAnim, Bind = p1.CleanupTable, p1.RealAnim, p1.Bind
+    local _, HumanoidRootPart = Char.Humanoid, Char.HumanoidRootPart
+
+    local function GetTorsoCF() -- line: 54
+        -- upvalues: Char (copy)
+        local _, v3 = Char.HumanoidRootPart.CFrame:ToOrientation()
+
+        return CFrame.new(Char.Torso.Position) * CFrame.Angles(0, v3, 0)
+    end
+
+    local self = setmetatable({}, t2)
+
+    self._maid = Maid.new()
+
+    local v5 = Char == game.Players.LocalPlayer.Character
+    local connection
+    local v6 = false
+
+    local function Clean() -- line: 68
+        -- upvalues: self (copy), v6 (ref)
+        if not v6 then
+            v6 = true
+            self._maid:doCleaning()
+        end
+    end
+
+    local v7 = false
+    local v8 = shared.sfx({
+        SoundId = "rbxassetid://110844914335330",
+        Volume = 7,
+        Parent = v5 and workspace or Char.Torso,
+        AddTo = CleanupTable,
+        TimePosition = RealAnim.TimePosition + 0.1,
+        RollOffMaxDistance = v5 and 200 or 80
+    })
+
+    v8:Play()
+
+    local v9 = tick()
+    local v10 = task.delay(9.5, function() -- line: 97
+        -- upvalues: CleanupTable (copy), v8 (copy)
+        local t5 = {}
+
+        for _, descendant in pairs(script.vfx:GetDescendants()) do
+            t5[tostring(descendant)] = true
+        end
+
+        for _, v11 in pairs(CleanupTable) do
+            if typeof(v11) ~= "thread" and t5[tostring(v11)] then
+                v11:SetAttribute("DelayDeletion", 5)
+            end
+        end
+
+        v8:SetAttribute("DelayDeletion", 5)
+    end)
+
+    table.insert(CleanupTable, v10)
+    connection = Bind:GetPropertyChangedSignal("Parent"):Connect(function() -- line: 112
+        -- upvalues: Bind (copy), self (copy), connection (ref), v6 (ref), v7 (ref), v9 (copy), v10 (copy)
+        if Bind and Bind.Parent then
+            return
+        end
+
+        v7 = true
+        workspace.Camera:SetAttribute("paused", false)
+
+        if not (tick() - v9 >= 9.87) then
+            if v10 then
+                task.cancel(v10)
+            end
+
+            if not v6 then
+                v6 = true
+                self._maid:doCleaning()
+            end
+        end
+
+        return connection:Disconnect()
+    end)
+    task.delay(15, function() -- line: 129
+        -- upvalues: connection (ref)
+        if connection then
+            return connection:Disconnect()
+        end
+    end)
+    task.delay(15, function() -- line: 135
+        -- upvalues: self (copy), v6 (ref)
+        if not v6 then
+            v6 = true
+            self._maid:doCleaning()
+        end
+    end)
+
+    local function FirstEvent() -- line: 142
+        -- upvalues: Char (copy), v2 (ref), CleanupTable (copy), RealAnim (copy), Bind (copy), HumanoidRootPart (copy), self (copy), v7 (ref), v5 (copy), v8 (copy), PlayAttachment (copy), PlayTween (copy), dtwait (copy), EFP (copy), PlayMesh (copy), Able (copy), LifeScale (copy), QuickFX (copy), vfx (copy), v1 (copy), TweenService (copy)
+        local v12
+
+        task.delay(2.02, function() -- line: 144
+            -- upvalues: v12 (ref), v5 (copy), PlayTween (copy)
+            if v5 and v12 then
+                for _, descendant in pairs(v12:GetDescendants()) do
+                    if descendant:IsA("Beam") then
+                        PlayTween(descendant, {
+                            Time = 0.05,
+                            EasingStyle = "Sine",
+                            Goal = {
+                                Transparency = NumberSequence.new({
+                                    NumberSequenceKeypoint.new(0, 1),
+                                    NumberSequenceKeypoint.new(1, 1)
+                                })
+                            }
+                        })
+                        game.Debris:AddItem(descendant, 0.05)
+                    end
+                end
+            end
+        end)
+
+        if v5 then
+            local v13 = false
+
+            if v7 then
+                v7 = true
+            elseif RealAnim and RealAnim.IsPlaying and Bind and Bind.Parent then
+                v13 = true
+            else
+                v7 = true
+            end
+
+            if not v13 then
+                return
+            end
+
+            dtwait(0.3)
+
+            local v14 = false
+
+            if v7 then
+                v7 = true
+            elseif RealAnim and RealAnim.IsPlaying and Bind and Bind.Parent then
+                v14 = true
+            else
+                v7 = true
+            end
+
+            if not v14 then
+                return
+            end
+
+            local v15 = self._maid:give(Instance.new("ColorCorrectionEffect"))
+
+            v15.Brightness = 5
+            table.insert(CleanupTable, v15)
+
+            if v5 then
+                v15.Parent = game.Lighting
+            end
+
+            dtwait(0.05)
+
+            if v7 or not RealAnim or not RealAnim.IsPlaying or not Bind or not Bind.Parent then
+                v7 = true
+
+                return
+            end
+
+            v15.TintColor = Color3.fromRGB(255, 0, 0)
+            v15.Brightness = 1.667
+            dtwait(0.05)
+
+            local v16 = false
+
+            if v7 then
+                v7 = true
+            elseif RealAnim and RealAnim.IsPlaying and Bind and Bind.Parent then
+                v16 = true
+            else
+                v7 = true
+            end
+
+            if not v16 then
+                return
+            end
+
+            v15:Destroy()
+            v12 = QuickFX({
+                FX = vfx.LinesStuff,
+                Maid = self._maid,
+                Anchor = HumanoidRootPart.CFrame * CFrame.new(4.669425964355469, -2.979383945465088, 2.005949020385742) * CFrame.Angles(-1.5707963705062866, 1.5707963705062866, 0) * CFrame.Angles(-1.5707963267948966, -1.5707963267948966, 0)
+            })
+
+            local Debris = game.Debris
+            local v17 = v12
+
+            Debris:AddItem(v17, 2)
+            table.insert(CleanupTable, v17)
+            TweenService:Create(v12.M1, TweenInfo.new(0.4, Enum.EasingStyle.Sine), {
+                CFrame = HumanoidRootPart.CFrame * CFrame.new(26.27595520019531, 0.2, 2.3607187271118164)
+            }):Play()
+            dtwait(0.4)
+
+            local v18 = false
+
+            if v7 then
+                v7 = true
+            elseif RealAnim and RealAnim.IsPlaying and Bind and Bind.Parent then
+                v18 = true
+            else
+                v7 = true
+            end
+
+            if not v18 then
+                return
+            end
+
+            TweenService:Create(v12.M1.Attachment.Beam, TweenInfo.new(1, Enum.EasingStyle.Sine), {
+                Width0 = 73,
+                Width1 = 73
+            }):Play()
+            PlayTween(v12.F1.Attachment.Beam, {
+                Time = 0.3,
+                EasingStyle = "Standard",
+                Goal = {
+                    Color = ColorSequence.new({
+                        ColorSequenceKeypoint.new(0, Color3.fromRGB(255, 0, 0)),
+                        ColorSequenceKeypoint.new(1, Color3.fromRGB(255, 0, 0))
+                    })
+                }
+            })
+        else
+            local v19, v20
+
+            if not v7 and RealAnim and RealAnim.IsPlaying and Bind and Bind.Parent then
+                local v21 = QuickFX({
+                    FX = vfx.Glow,
+                    Maid = self._maid,
+                    Anchor = HumanoidRootPart.CFrame * CFrame.new(0, -HumanoidRootPart.Size.Y * 1.5, 0)
+                })
+
+                PlayAttachment(v21)
+                table.insert(CleanupTable, v21)
+                dtwait(1.1)
+
+                if v7 then
+                    v7 = true
+                    v19 = false
+                elseif RealAnim and RealAnim.IsPlaying and Bind and Bind.Parent then
+                    v19 = true
+                else
+                    v7 = true
+                    v19 = false
+                end
+
+                v20 = false
+            else
+                v7 = true
+                v20 = true
+            end
+
+            if v20 or not v19 then
+                return
+            end
+        end
+
+        dtwait(1.2)
+
+        if v7 or not RealAnim or not RealAnim.IsPlaying or not Bind or not Bind.Parent then
+            v7 = true
+
+            return
+        end
+
+        dtwait(0.3)
+
+        if v7 or not RealAnim or not RealAnim.IsPlaying or not Bind or not Bind.Parent then
+            v7 = true
+
+            return
+        end
+
+        local v22 = QuickFX({
+            FX = vfx.SmokeFx,
+            Maid = self._maid,
+            Anchor = HumanoidRootPart.CFrame * CFrame.new(0, -HumanoidRootPart.Size.Y * 1.5, 0)
+        })
+
+        PlayAttachment(v22)
+        table.insert(CleanupTable, v22)
+        task.delay(1.1, function() -- line: 242
+            -- upvalues: Char (copy), v2 (ref), CleanupTable (copy), RealAnim (copy), Bind (copy), HumanoidRootPart (copy), self (copy), v7 (ref), v5 (copy), v8 (copy), PlayAttachment (copy), PlayTween (copy), dtwait (copy), EFP (copy), PlayMesh (copy), Able (copy), LifeScale (copy), QuickFX (copy), vfx (copy), v1 (copy), TweenService (copy)
+            if v7 or not RealAnim or not RealAnim.IsPlaying or not Bind or not Bind.Parent then
+                v7 = true
+
+                return
+            end
+
+            local function ad() -- line: 247
+                -- upvalues: CleanupTable (copy)
+                local CurrentCamera = workspace.CurrentCamera
+                local clone = script.vfx.RedScreen:Clone()
+
+                clone.Parent = workspace.Thrown
+                clone.Anchored = true
+                clone.Position = Vector3.new(40000, 40000, 40000)
+                table.insert(CleanupTable, clone)
+                workspace.Camera:SetAttribute("paused", true)
+                CurrentCamera.FieldOfView = game.Players.LocalPlayer:GetAttribute("S_FOV") or 70
+                CurrentCamera.CameraType = Enum.CameraType.Scriptable
+                CurrentCamera.CFrame = clone.CFrame * CFrame.new(0, 0, 7.5)
+
+                return clone
+            end
+
+            local v23
+
+            local function EyeEvent() -- line: 268
+                -- upvalues: ad (copy), v23 (ref), Char (copy), v2 (ref), CleanupTable (copy), RealAnim (copy), Bind (copy), HumanoidRootPart (copy), self (copy), v7 (ref), v5 (copy), v8 (copy), PlayAttachment (copy), PlayTween (copy), dtwait (copy), EFP (copy), PlayMesh (copy), Able (copy), LifeScale (copy), QuickFX (copy), vfx (copy), v1 (copy), TweenService (copy)
+                if v5 then
+                    for _, child in pairs(Char:GetChildren()) do
+                        if child:IsA("Accessory") and child:GetAttribute("EmoteBindThing") then
+                            child:SetAttribute("ForceDestroy", true)
+                        end
+                    end
+
+                    local v24 = ad()
+
+                    v24.Parent = EFP
+                    v23 = v24
+                    Able({
+                        On = true,
+                        FX = v24
+                    })
+
+                    for _, descendant in pairs(v24:GetDescendants()) do
+                        if descendant:IsA("ParticleEmitter") then
+                            if descendant.Name == "Star" then
+                                descendant:Emit(descendant:GetAttribute("EmitCount"))
+                            elseif descendant.Name == "wavee" or descendant.Name == "Mist" then
+                                task.delay(0.4, function() -- line: 285
+                                    -- upvalues: descendant (copy)
+                                    descendant:Emit(descendant:GetAttribute("EmitCount"))
+                                end)
+                            elseif descendant.Name == "Star2" then
+                                task.delay(0.9, function() -- line: 290
+                                    -- upvalues: descendant (copy)
+                                    descendant:Emit(descendant:GetAttribute("EmitCount"))
+                                end)
+                            elseif descendant.Name == "water" or descendant.Name == "black" or descendant.Name == "black2" then
+                                task.delay(0.95, function() -- line: 295
+                                    -- upvalues: descendant (copy)
+                                    descendant:Emit(descendant:GetAttribute("EmitCount"))
+                                end)
+                            end
+                        end
+                    end
+                end
+
+                dtwait(2)
+
+                if v7 or not RealAnim or not RealAnim.IsPlaying or not Bind or not Bind.Parent then
+                    v7 = true
+
+                    return
+                end
+
+                if v23 then
+                    Able({
+                        On = false,
+                        FX = v23
+                    })
+                end
+
+                if v5 then
+                    v8.Parent = Char.Torso
+                    workspace.Camera:SetAttribute("paused", false)
+                    task.spawn(function() -- line: 319
+                        -- upvalues: RealAnim (copy), Bind (copy), v7 (ref)
+                        local v25 = tick()
+                        local v26
+
+                        v26 = shared.loop(function() -- line: 321
+                            -- upvalues: v25 (copy), v26 (ref), RealAnim (copy), Bind (copy), v7 (ref)
+                            local v27
+
+                            if tick() - v25 > 2 then
+                                v27 = false
+                            else
+                                local v28 = false
+
+                                if v7 then
+                                    v7 = true
+                                elseif RealAnim and RealAnim.IsPlaying and Bind and Bind.Parent then
+                                    v28 = true
+                                else
+                                    v7 = true
+                                end
+
+                                v27 = not not v28
+                            end
+
+                            if not v27 then
+                                v26()
+                            end
+
+                            shared.repfire({
+                                Effect = "Camshake",
+                                Intensity = 1
+                            })
+                        end, 60)
+                        wait(2)
+
+                        if v7 or not RealAnim or not RealAnim.IsPlaying or not Bind or not Bind.Parent then
+                            v7 = true
+
+                            return
+                        end
+
+                        local v29 = tick()
+                        local v30
+
+                        v30 = shared.loop(function() -- line: 335
+                            -- upvalues: v29 (copy), v30 (ref), RealAnim (copy), Bind (copy), v7 (ref)
+                            local v31
+
+                            if tick() - v29 > 2 then
+                                v31 = false
+                            else
+                                local v32 = false
+
+                                if v7 then
+                                    v7 = true
+                                elseif RealAnim and RealAnim.IsPlaying and Bind and Bind.Parent then
+                                    v32 = true
+                                else
+                                    v7 = true
+                                end
+
+                                v31 = not not v32
+                            end
+
+                            if not v31 then
+                                v30()
+                            end
+
+                            shared.repfire({
+                                Effect = "Camshake",
+                                Intensity = 3
+                            })
+                        end, 60)
+                    end)
+
+                    local PrimaryPart = Char.PrimaryPart
+                    local CurrentCamera = workspace.CurrentCamera
+
+                    game.Players.LocalPlayer.CameraMinZoomDistance = 100
+
+                    local v33 = PrimaryPart.CFrame * CFrame.new(0.121032715, 4.415802, 15.8661346, 0.999988973, -0.000791892409, 0.00464361906, -2.88034645E-08, 0.985767841, 0.168112651, -0.00471064448, -0.168110803, 0.985756874)
+
+                    CurrentCamera.CFrame = CFrame.new(v33.Position, (PrimaryPart.CFrame + PrimaryPart.CFrame.lookVector * 10).Position + Vector3.new(0, 2, 0))
+                    CurrentCamera.CameraType = Enum.CameraType.Custom
+
+                    local v34 = tick()
+                    local connection
+
+                    connection = game:GetService("RunService").Heartbeat:Connect(function() -- line: 354
+                        -- upvalues: PrimaryPart (copy), CurrentCamera (copy), v33 (copy), v34 (copy), connection (ref)
+                        if tick() - v34 > 0.15 then
+                            game.Players.LocalPlayer.CameraMinZoomDistance = 0.5
+
+                            return connection:Disconnect()
+                        end
+
+                        CurrentCamera.CFrame = CFrame.new(v33.Position, (PrimaryPart.CFrame + PrimaryPart.CFrame.lookVector * 10).Position)
+                    end)
+                end
+
+                local function AuraEvent() -- line: 364
+                    -- upvalues: Char (copy), v2 (ref), CleanupTable (copy), RealAnim (copy), Bind (copy), HumanoidRootPart (copy), self (copy), v7 (ref), PlayAttachment (copy), PlayTween (copy), dtwait (copy), EFP (copy), PlayMesh (copy), Able (copy), LifeScale (copy), QuickFX (copy), vfx (copy), v1 (copy), TweenService (copy)
+                    if v7 or not RealAnim or not RealAnim.IsPlaying or not Bind or not Bind.Parent then
+                        v7 = true
+
+                        return
+                    end
+
+                    local v35 = self._maid:give(Instance.new("Highlight"))
+
+                    table.insert(CleanupTable, v35)
+                    v35.DepthMode = Enum.HighlightDepthMode.Occluded
+                    v35.FillColor = Color3.fromRGB(0, 0, 0)
+                    v35.FillTransparency = 0
+                    v35.OutlineTransparency = 1
+                    v35.Parent = Char
+                    TweenService:Create(v35, TweenInfo.new(4, Enum.EasingStyle.Sine), {
+                        FillTransparency = 1
+                    }):Play()
+                    game.Debris:AddItem(v35, 4)
+
+                    local v36 = QuickFX({
+                        FX = vfx.LinesFx,
+                        Maid = self._maid,
+                        Anchor = HumanoidRootPart.CFrame * CFrame.new(0, -HumanoidRootPart.Size.Y * 1.5, 0)
+                    })
+
+                    Able({
+                        On = true,
+                        FX = v36
+                    })
+                    table.insert(CleanupTable, v36)
+
+                    local v37 = QuickFX({
+                        FX = vfx.Lightning,
+                        Maid = self._maid,
+                        Anchor = HumanoidRootPart.CFrame * CFrame.new(0, -HumanoidRootPart.Size.Y * 1.5, 0)
+                    })
+
+                    table.insert(CleanupTable, v37)
+
+                    for _, descendant in pairs(v37:GetDescendants()) do
+                        local v38 = false
+
+                        if v7 then
+                            v7 = true
+                        elseif RealAnim and RealAnim.IsPlaying and Bind and Bind.Parent then
+                            v38 = true
+                        else
+                            v7 = true
+                        end
+
+                        if not v38 then
+                            return
+                        end
+
+                        if descendant:IsA("ParticleEmitter") or descendant:IsA("Beam") then
+                            descendant.Enabled = true
+                        end
+                    end
+
+                    if v7 or not RealAnim or not RealAnim.IsPlaying or not Bind or not Bind.Parent then
+                        v7 = true
+                    else
+                        local v39 = QuickFX({
+                            FX = vfx.Blast,
+                            Maid = self._maid,
+                            Anchor = HumanoidRootPart.CFrame * CFrame.new(0, -HumanoidRootPart.Size.Y * 1.5, 0)
+                        })
+
+                        v39:ScaleTo(3)
+                        LifeScale({
+                            Scale = 2.5,
+                            FX = v39
+                        })
+                        PlayAttachment(v39)
+
+                        local v40 = QuickFX({
+                            FX = vfx.PreAura,
+                            Maid = self._maid,
+                            Anchor = HumanoidRootPart.CFrame * CFrame.new(0, -HumanoidRootPart.Size.Y * 1.5, 0)
+                        })
+
+                        v40:ScaleTo(0.5)
+                        table.insert(CleanupTable, v39)
+                        table.insert(CleanupTable, v40)
+
+                        local v41 = self._maid:give(Instance.new("NumberValue"))
+
+                        table.insert(CleanupTable, v41)
+                        self._maid:giveTask(v41.Changed:Connect(function() -- line: 433
+                            -- upvalues: v40 (copy), v41 (copy), RealAnim (copy), Bind (copy), v7 (ref)
+                            if not v7 and RealAnim and RealAnim.IsPlaying and Bind and Bind.Parent then
+                                v40:ScaleTo(v41.Value)
+                            else
+                                v7 = true
+                            end
+                        end))
+
+                        for _, descendant in pairs(v40:GetDescendants()) do
+                            if descendant:IsA("ParticleEmitter") then
+                                local v42 = false
+
+                                if v7 then
+                                    v7 = true
+                                elseif RealAnim and RealAnim.IsPlaying and Bind and Bind.Parent then
+                                    v42 = true
+                                else
+                                    v7 = true
+                                end
+
+                                if not v42 then
+                                    return
+                                end
+
+                                descendant.Lifetime = NumberRange.new(descendant.Lifetime.Min * 0.5, descendant.Lifetime.Max * 0.5)
+                                descendant.Speed = NumberRange.new(descendant.Speed.Min * 2, descendant.Speed.Max * 2)
+                            end
+                        end
+
+                        task.spawn(function() -- line: 452
+                            -- upvalues: v2 (ref), CleanupTable (copy), RealAnim (copy), Bind (copy), HumanoidRootPart (copy), v7 (ref), dtwait (copy), PlayMesh (copy), vfx (copy)
+                            for i = 1, 28 do
+                                local v43 = false
+
+                                if not v7 and RealAnim and RealAnim.IsPlaying and Bind and Bind.Parent then
+                                    v43 = true
+                                else
+                                    v7 = true
+                                end
+
+                                if not (v43 and shared.OnScreen(HumanoidRootPart.Position)) then
+                                    return
+                                end
+
+                                local v44 = i * 0.3
+                                local clone = vfx.Bright2:Clone()
+
+                                table.insert(CleanupTable, clone)
+
+                                local v45 = v44 / 10 * 20
+
+                                if v2 then
+                                    v45 /= 1.125
+                                end
+
+                                clone:ScaleTo(v45)
+                                PlayMesh({
+                                    EndT = 0,
+                                    Model = clone,
+                                    Anchor = HumanoidRootPart.CFrame * CFrame.new(0, v44 / 10 * 150, 0) * CFrame.Angles(0, math.rad((math.random(0, 360))), 0),
+                                    Info = TweenInfo.new(v44 / 50 + 0.2, Enum.EasingStyle.Quad)
+                                })
+                                dtwait(0.06)
+                            end
+                        end)
+                        v41.Value = v40:GetScale()
+                        TweenService:Create(v41, TweenInfo.new(2.1, Enum.EasingStyle.Sine), {
+                            Value = v2 and 2.5 or 4
+                        }):Play()
+                        Able({
+                            On = true,
+                            FX = v40
+                        })
+                        table.insert(CleanupTable, (task.delay(2.1, function() -- line: 477
+                            -- upvalues: v40 (copy), Able (copy)
+                            Able({
+                                On = false,
+                                FX = v40
+                            })
+                        end)))
+
+                        local v50 = RaycastParams.new()
+
+                        v50.FilterType = Enum.RaycastFilterType.Include
+                        v50.FilterDescendantsInstances = {
+                            workspace.Map,
+                            workspace.Built
+                        }
+
+                        local v51 = self._maid:give(Instance.new("NumberValue"))
+
+                        v51.Value = 5
+                        table.insert(CleanupTable, v51)
+                        TweenService:Create(v51, TweenInfo.new(2.1, Enum.EasingStyle.Sine), {
+                            Value = v2 and 25 or 40
+                        }):Play()
+                        task.spawn(function() -- line: 492
+                            -- upvalues: v50 (copy), v51 (copy), CleanupTable (copy), RealAnim (copy), Bind (copy), HumanoidRootPart (copy), self (copy), v7 (ref), dtwait (copy), EFP (copy), vfx (copy), v1 (copy), TweenService (copy)
+                            local _CFrame = HumanoidRootPart.CFrame
+                            local v53 = tick()
+
+                            while true do
+                                if tick() - v53 < 2.1 then
+                                    if not v7 and RealAnim and RealAnim.IsPlaying and Bind and Bind.Parent then
+                                        for _ = 1, math.random(6, 9) do
+                                            local v54 = false
+
+                                            if v7 then
+                                                v7 = true
+                                            elseif RealAnim and RealAnim.IsPlaying and Bind and Bind.Parent then
+                                                v54 = true
+                                            else
+                                                v7 = true
+                                            end
+
+                                            if not v54 then
+                                                return
+                                            end
+
+                                            local v55 = _CFrame * CFrame.new(v1:NextNumber(-v51.Value, v51.Value), -HumanoidRootPart.Size.Y * 1.3, v1:NextNumber(-v51.Value, v51.Value))
+                                            local v56 = game.Workspace:Raycast(v55.Position, Vector3.new(0, -30, 0), v50)
+
+                                            if v56 and shared.OnScreen(HumanoidRootPart.Position) then
+                                                local v57 = self._maid:give(vfx.Rock:Clone())
+
+                                                table.insert(CleanupTable, v57)
+                                                v57.Material = v56.Instance.Material
+                                                v57.Size = Vector3.new(0, 0, 0)
+                                                v57.Color = v56.Instance.Color
+
+                                                local v64 = v55 * CFrame.new(0, v1:NextNumber(40, 70), 0) * CFrame.Angles(math.rad((math.random(0, 360))), math.rad((math.random(0, 360))), (math.rad((math.random(0, 360)))))
+
+                                                table.insert(CleanupTable, v64)
+                                                v57.CFrame = v55 * CFrame.Angles(math.rad((math.random(0, 360))), math.rad((math.random(0, 360))), (math.rad((math.random(0, 360)))))
+                                                v57.Parent = EFP
+                                                TweenService:Create(v57, TweenInfo.new(0.15, Enum.EasingStyle.Sine), {
+                                                    Size = Vector3.new(v1:NextNumber(2, 4), v1:NextNumber(2, 4), v1:NextNumber(2, 4))
+                                                }):Play()
+
+                                                local v73 = v1:NextNumber(0.3, 0.5)
+
+                                                task.delay(0.15, function() -- line: 529
+                                                    -- upvalues: v57 (copy), v73 (copy), RealAnim (copy), Bind (copy), v7 (ref), TweenService (copy)
+                                                    if not v7 and RealAnim and RealAnim.IsPlaying and Bind and Bind.Parent then
+                                                        TweenService:Create(v57, TweenInfo.new(v73 - 0.15, Enum.EasingStyle.Sine), {
+                                                            Size = Vector3.new(0, 0, 0)
+                                                        }):Play()
+                                                    else
+                                                        v7 = true
+                                                    end
+                                                end)
+                                                TweenService:Create(v57, TweenInfo.new(v73, Enum.EasingStyle.Sine), {
+                                                    CFrame = v64
+                                                }):Play()
+                                                game.Debris:AddItem(v57, v73 + 0.2)
+                                            end
+                                        end
+
+                                        if not v7 and RealAnim and RealAnim.IsPlaying and Bind and Bind.Parent then
+                                            dtwait(0.06)
+                                            continue
+                                        end
+
+                                        v7 = true
+
+                                        return
+                                    end
+
+                                    v7 = true
+                                    break
+                                end
+
+                                return
+                            end
+                        end)
+
+                        if v7 or not RealAnim or not RealAnim.IsPlaying or not Bind or not Bind.Parent then
+                            v7 = true
+                        else
+                            dtwait(2.1)
+
+                            if v7 or not RealAnim or not RealAnim.IsPlaying or not Bind or not Bind.Parent then
+                                v7 = true
+                            else
+                                Able({
+                                    On = false,
+                                    FX = v36
+                                })
+
+                                for _, descendant in pairs(v37:GetDescendants()) do
+                                    if descendant:IsA("Beam") then
+                                        PlayTween(descendant, {
+                                            Time = 0.25,
+                                            EasingStyle = "Sine",
+                                            Goal = {
+                                                Transparency = NumberSequence.new({
+                                                    NumberSequenceKeypoint.new(0, 1),
+                                                    NumberSequenceKeypoint.new(1, 1)
+                                                })
+                                            }
+                                        })
+                                        game.Debris:AddItem(descendant, 0.25)
+                                    elseif descendant:IsA("ParticleEmitter") then
+                                        descendant.Enabled = false
+                                    end
+                                end
+
+                                local v74 = QuickFX({
+                                    FX = v2 and vfx.BigAuraFx2 or vfx.BigAuraFx,
+                                    Maid = self._maid,
+                                    Anchor = HumanoidRootPart.CFrame * CFrame.new(0, -HumanoidRootPart.Size.Y * 1.5, 0) * CFrame.Angles(0, 0, 3.141592653589793)
+                                })
+
+                                for _, descendant in pairs(v74:GetDescendants()) do
+                                    local v75 = false
+
+                                    if v7 then
+                                        v7 = true
+                                    elseif RealAnim and RealAnim.IsPlaying and Bind and Bind.Parent then
+                                        v75 = true
+                                    else
+                                        v7 = true
+                                    end
+
+                                    if not v75 then
+                                        return
+                                    end
+
+                                    if descendant:IsA("ParticleEmitter") or descendant:IsA("Beam") then
+                                        descendant.Enabled = true
+
+                                        if descendant:IsA("ParticleEmitter") then
+                                            descendant.Rate *= 0.7
+                                        end
+                                    end
+                                end
+
+                                dtwait(1.6)
+
+                                if v7 or not RealAnim or not RealAnim.IsPlaying or not Bind or not Bind.Parent then
+                                    v7 = true
+                                else
+                                    for _, descendant in pairs(v74:GetDescendants()) do
+                                        local v76 = false
+
+                                        if v7 then
+                                            v7 = true
+                                        elseif RealAnim and RealAnim.IsPlaying and Bind and Bind.Parent then
+                                            v76 = true
+                                        else
+                                            v7 = true
+                                        end
+
+                                        if not v76 then
+                                            return
+                                        end
+
+                                        if descendant:IsA("Beam") then
+                                            PlayTween(descendant, {
+                                                Time = 0.25,
+                                                EasingStyle = "Sine",
+                                                Goal = {
+                                                    Transparency = NumberSequence.new({
+                                                        NumberSequenceKeypoint.new(0, 1),
+                                                        NumberSequenceKeypoint.new(1, 1)
+                                                    })
+                                                }
+                                            })
+                                            game.Debris:AddItem(descendant, 0.25)
+                                        elseif descendant:IsA("ParticleEmitter") then
+                                            descendant.Enabled = false
+                                        end
+                                    end
+                                end
+                            end
+                        end
+                    end
+                end
+
+                task.spawn(AuraEvent)
+            end
+
+            EyeEvent()
+        end)
+        dtwait(1.5)
+        Able({
+            On = true,
+            FX = v22
+        })
+        dtwait(2)
+        Able({
+            On = false,
+            FX = v22
+        })
+    end
+
+    task.spawn(FirstEvent)
+    wait(14)
+
+    if not v6 then
+        v6 = true
+        self._maid:doCleaning()
+    end
+end
+
+return t1
