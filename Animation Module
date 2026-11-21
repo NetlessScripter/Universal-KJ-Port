@@ -1,5 +1,19 @@
-if getgenv().Animator6DLoadedPro then return end
-getgenv().Animator6DLoadedPro = true
+-- Load guard.
+-- The flag alone is not enough: it is set before Animator6D exists (further down), so a second
+-- loader that arrives while the first one is still waiting for the character, or after a load that
+-- died part-way, used to return early and leave every caller with a nil Animator6D.
+do
+    local genv = getgenv()
+    if genv.Animator6DLoadedPro then
+        local started = genv.Animator6DLoadStarted or 0
+        -- another copy is still loading: wait for it to finish defining Animator6D
+        while not genv.Animator6D and os.clock() - started < 8 do task.wait(0.05) end
+        if genv.Animator6D then return end
+        -- the earlier load never got as far as defining Animator6D: load again instead of giving up
+    end
+    genv.Animator6DLoadedPro = true
+    genv.Animator6DLoadStarted = os.clock()
+end
 
 local Players     = game:GetService("Players")
 local RunService  = game:GetService("RunService")
